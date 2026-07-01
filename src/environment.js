@@ -8,18 +8,21 @@ import { makeNoise2D, mulberry32 } from './noise.js';
 
 export const PRESETS = {
   day: {
-    sunElev: 17, sunAz: 150, turbidity: 2.4, rayleigh: 3.0, mie: 0.005, g: 0.8, exposure: 0.6,
-    sunColor: 0xffe7bf, sunInt: 3.8, hemiSky: 0x8ab4ff, hemiGround: 0x224850, hemiInt: 0.38,
-    ambient: 0x315a86, ambientInt: 0.15, fog: 0xb0ccdb, fogDensity: 0.0004,
-    waterColor: 0x2f4f4a, sunWater: 0xffeccb, distortion: 3.2, waterSize: 2.6,
-    cloudWarm: 0xfff1e0, cloudCool: 0xb4c6dc, cloudCount: 20, cloudOpacity: 0.95, cloudElevHi: true,
+    sunElev: 38, sunAz: 205, turbidity: 1.8, rayleigh: 2.3, mie: 0.0035, g: 0.75, exposure: 0.33,
+    sunColor: 0xfff3e0, sunInt: 5.6, hemiSky: 0x7fb2ff, hemiGround: 0x2e4f46, hemiInt: 0.6,
+    ambient: 0x3a6ea5, ambientInt: 0.22, fog: 0xa9c6e0, fogDensity: 0.00022,
+    waterColor: 0x2a544e, sunWater: 0xfff2d0, distortion: 3.4, waterSize: 2.8,
+    cloudWarm: 0xfff8ee, cloudCool: 0xcfdcec, cloudCount: 11, cloudOpacity: 0.55, cloudElevHi: true,
+    cloudSize: [800, 1500],
+    bloom: { strength: 0.25, radius: 0.4, threshold: 1.1 },
   },
   golden: {
-    sunElev: 5, sunAz: 162, turbidity: 6.0, rayleigh: 3.0, mie: 0.005, g: 0.78, exposure: 0.5,
-    sunColor: 0xffb36b, sunInt: 2.85, hemiSky: 0xbfd4f2, hemiGround: 0x3a4a66, hemiInt: 0.26,
-    ambient: 0x2c4a77, ambientInt: 0.12, fog: 0xe0a585, fogDensity: 0.0016,
-    waterColor: 0x1e3a37, sunWater: 0xffe3b3, distortion: 2.7, waterSize: 3.2,
-    cloudWarm: 0xffb675, cloudCool: 0x8089aa, cloudCount: 18, cloudOpacity: 0.7, cloudElevHi: false,
+    sunElev: 3.5, sunAz: 162, turbidity: 3.5, rayleigh: 4.0, mie: 0.005, g: 0.85, exposure: 0.42,
+    sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x6c7fd8, hemiGround: 0x2e2a3e, hemiInt: 0.3,
+    ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xe08055, fogDensity: 0.0009,
+    waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
+    cloudWarm: 0xff9e5a, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.65, cloudElevHi: false,
+    bloom: { strength: 0.5, radius: 0.6, threshold: 1.0 },
   },
 };
 
@@ -213,7 +216,8 @@ export function createEnvironment(scene, renderer) {
       const sunAmt = Math.pow(THREE.MathUtils.clamp(dir.dot(sunDir), 0, 1), 1.6);
       mat.color.copy(cool).lerp(warm, sunAmt);
       mat.opacity = preset.cloudOpacity * (0.5 + 0.5 * crng());
-      const w = 1500 + crng() * 2700; spr.scale.set(w, w * (0.32 + crng() * 0.18), 1);
+      const [w0, w1] = preset.cloudSize || [1500, 2700];
+      const w = w0 + crng() * (w1 - w0); spr.scale.set(w, w * (0.32 + crng() * 0.18), 1);
       cloudGroup.add(spr);
     }
   }

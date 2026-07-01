@@ -13,7 +13,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
-import { createEnvironment } from './environment.js';
+import { createEnvironment, PRESETS } from './environment.js';
 import { buildArchipelago } from './archipelago.js';
 import { createBoat } from './boat.js';
 import { createHUD } from './hud.js';
@@ -71,7 +71,7 @@ const keymap = {
 addEventListener('keydown', (e) => {
   if (keymap[e.code]) { input[keymap[e.code]] = true; e.preventDefault(); }
   if (e.code === 'KeyC') cycleCamera();
-  if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); }
+  if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
 });
 addEventListener('keyup', (e) => { if (keymap[e.code]) { input[keymap[e.code]] = false; e.preventDefault(); } });
 
@@ -136,6 +136,14 @@ const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 0.84);
 composer.addPass(bloom);
+// bloom sits BEFORE OutputPass, so its threshold reads LINEAR HDR values — the
+// sky near the sun is far above 1.0 there. Threshold must be >= 1.0 or the whole
+// sun quadrant blooms into a white wash. Tuned per preset.
+function applyBloom() {
+  const b = PRESETS[env.presetName].bloom;
+  if (b) { bloom.strength = b.strength; bloom.radius = b.radius; bloom.threshold = b.threshold; }
+}
+applyBloom();
 composer.addPass(new OutputPass());
 const grade = new ShaderPass({
   uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
@@ -163,7 +171,7 @@ addEventListener('resize', () => {
 const hud = createHUD();
 
 // dev hook for inspection
-window.__game = { boat, env, wind, input, camera, THREE, archipelago, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
+window.__game = { boat, env, wind, input, camera, THREE, archipelago, bloom, grade, renderer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
 
 /* ── loop ── */
 const clock = new THREE.Clock();
