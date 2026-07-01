@@ -1,0 +1,212 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   Skärgård — a good-feel sailing game in a Finnish archipelago.
+   Helm a small sloop through a field of granite skerries: real points of sail,
+   momentum, heel, wind, wake. Arrow keys to steer + trim, C for camera, T for
+   time of day.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+import { createEnvironment } from './environment.js';
+import { buildArchipelago } from './archipelago.js';
+import { createBoat } from './boat.js';
+import { createHUD } from './hud.js';
+import { createAudio } from './audio.js';
+
+/* ── renderer / scene / camera ── */
+const container = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.5, 16000);
+camera.position.set(0, 12, 24);
+
+/* ── world ── */
+const env = createEnvironment(scene, renderer);
+// the REAL Archipelago Sea: 550+ actual island outlines (OSM) around Utö–Jurmo
+const mapData = await (await fetch('/archipelago_map.json')).json();
+const archipelago = buildArchipelago(scene, env, mapData);
+const boat = createBoat(scene);
+
+// spawn in open water off Utö, bow pointed toward Jurmo
+{
+  const uto = archipelago.islands.find((i) => i.name === 'Utö');
+  const jurmo = archipelago.islands.find((i) => i.name === 'Jurmo');
+  if (uto) {
+    let sx = uto.x + uto.bbox.maxX + 60, sz = uto.z;
+    for (let n = 0; n < 30 && archipelago.heightAt(sx, sz) > -1.2; n++) sx += 30;
+    boat.state.pos.set(sx, 0, sz);
+    boat.state.heading = jurmo ? Math.atan2(jurmo.x - sx, jurmo.z - sz) : Math.PI;
+  }
+}
+
+/* ── wind (blows TOWARD windDir; slowly shifts) ── */
+const wind = { dir: new THREE.Vector3(Math.sin(2.2), 0, Math.cos(2.2)).normalize(), speed: 0.8, baseHeading: 2.2 };
+
+/* ── audio (starts on first interaction, per autoplay policy) ── */
+const audio = createAudio();
+const startAudio = () => audio.start();
+addEventListener('keydown', startAudio, { once: true });
+addEventListener('pointerdown', startAudio, { once: true });
+
+/* ── input ── */
+const input = { left: false, right: false, sheetIn: false, sheetOut: false };
+const keymap = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'sheetIn', KeyW: 'sheetIn', ArrowDown: 'sheetOut', KeyS: 'sheetOut',
+};
+addEventListener('keydown', (e) => {
+  if (keymap[e.code]) { input[keymap[e.code]] = true; e.preventDefault(); }
+  if (e.code === 'KeyC') cycleCamera();
+  if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); }
+});
+addEventListener('keyup', (e) => { if (keymap[e.code]) { input[keymap[e.code]] = false; e.preventDefault(); } });
+
+/* ── camera rig: smooth chase, with an orbit mode on C ── */
+let camMode = 'pov';
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true; orbit.dampingFactor = 0.06; orbit.enablePan = false;
+orbit.minDistance = 10; orbit.maxDistance = 70; orbit.maxPolarAngle = Math.PI * 0.49;
+orbit.enabled = false;
+const CAM_MODES = ['chase', 'pov', 'orbit'];
+function cycleCamera() {
+  const i = CAM_MODES.indexOf(camMode);
+  camMode = CAM_MODES[(i + 1) % CAM_MODES.length];
+  orbit.enabled = camMode === 'orbit';
+  if (camMode !== 'pov') camera.up.set(0, 1, 0); // restore world-up for chase/orbit
+}
+const camPos = new THREE.Vector3(0, 12, 24);
+const camLook = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+function expLerp(cur, target, k, dt) { return cur + (target - cur) * (1 - Math.exp(-k * dt)); }
+
+function updateChase(dt) {
+  const s = boat.state;
+  _fwd.set(Math.sin(s.heading), 0, Math.cos(s.heading));
+  const dist = 17, height = 7.5, ahead = 8;
+  const tx = s.pos.x - _fwd.x * dist, tz = s.pos.z - _fwd.z * dist;
+  const ty = (env.waveHeightAt(s.pos.x, s.pos.z, perfT) || 0) + height;
+  camPos.x = expLerp(camPos.x, tx, 2.6, dt);
+  camPos.y = expLerp(camPos.y, ty, 2.6, dt);
+  camPos.z = expLerp(camPos.z, tz, 2.6, dt);
+  const lx = s.pos.x + _fwd.x * ahead, lz = s.pos.z + _fwd.z * ahead, ly = 2.0;
+  camLook.x = expLerp(camLook.x, lx, 3.4, dt);
+  camLook.y = expLerp(camLook.y, ly, 3.4, dt);
+  camLook.z = expLerp(camLook.z, lz, 3.4, dt);
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  camera.rotateZ(-s.heel * 0.35); // lean into the heel
+  const targetFov = 52 + THREE.MathUtils.clamp(s.speed * 1.4, 0, 12);
+  camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-3 * dt));
+  camera.updateProjectionMatrix();
+}
+
+// first-person helm view: ride the boat, looking forward over the bow. The boat's
+// heel/pitch/heave carry through, but the horizon is partly stabilised for comfort.
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const _povPos = new THREE.Vector3(), _povLook = new THREE.Vector3(), _povUp = new THREE.Vector3();
+function updatePOV(dt) {
+  boat.group.updateMatrixWorld();
+  _povPos.set(0, 2.0, -2.6); boat.group.localToWorld(_povPos);    // eye at the Swan's helm
+  _povLook.set(0, 1.35, 14); boat.group.localToWorld(_povLook);   // look forward over the bow
+  _povUp.set(0, 1, 0).applyQuaternion(boat.group.quaternion).lerp(WORLD_UP, 0.45).normalize();
+  camera.position.copy(_povPos);
+  camera.up.copy(_povUp);
+  camera.lookAt(_povLook);
+  const targetFov = 64;
+  camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-4 * dt));
+  camera.updateProjectionMatrix();
+}
+
+/* ── post ── */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.55, 0.84);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime;
+    void main(){ vec3 c=texture2D(tDiffuse,vUv).rgb;
+      c = mix(c, c*c*(3.0-2.0*c), 0.22);                          // filmic contrast
+      float l=dot(c,vec3(0.2126,0.7152,0.0722));
+      c += smoothstep(0.5,1.0,l)*vec3(0.04,0.014,-0.018);         // warm the highlights
+      c += (1.0-l)*vec3(-0.006,0.0,0.014);                         // cool the shadows (teal-orange)
+      c = mix(vec3(l), c, 1.18);                                   // richer saturation
+      float d=distance(vUv,vec2(0.5)); c*=1.0-smoothstep(0.33,0.96,d)*0.36; // cinematic vignette
+      float g=fract(sin(dot(vUv*(1.0+fract(uTime)),vec2(12.9898,78.233)))*43758.5453);
+      c+=(g-0.5)*0.022; gl_FragColor=vec4(max(c,0.0),1.0); }`,
+});
+composer.addPass(grade);
+
+addEventListener('resize', () => {
+  const w = innerWidth, h = innerHeight;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h); composer.setSize(w, h); bloom.setSize(w, h);
+});
+
+/* ── HUD ── */
+const hud = createHUD();
+
+// dev hook for inspection
+window.__game = { boat, env, wind, input, camera, THREE, archipelago, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
+
+/* ── loop ── */
+const clock = new THREE.Clock();
+let perfT = 0, firstFrame = true, lastLocCheck = -1;
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  perfT = clock.getElapsedTime();
+
+  // wind slowly shifts heading + breathes in strength
+  wind.baseHeading += Math.sin(perfT * 0.05) * 0.0015;
+  wind.dir.set(Math.sin(wind.baseHeading), 0, Math.cos(wind.baseHeading)).normalize();
+  wind.speed = 0.78 + Math.sin(perfT * 0.13) * 0.18;
+
+  boat.update(dt, { input, windDir: wind.dir, windSpeed: wind.speed, waveHeightAt: env.waveHeightAt, landHeightAt: archipelago.heightAt, time: perfT });
+  archipelago.update(dt, perfT, camera, env.sunDir);
+  env.update(dt, perfT, boat.state.pos);
+  grade.uniforms.uTime.value = perfT;
+
+  if (camMode === 'chase') updateChase(dt);
+  else if (camMode === 'pov') updatePOV(dt);
+  else if (camMode === 'orbit') { orbit.target.copy(boat.group.position); orbit.update(); }
+  // 'free' → leave the camera wherever it was placed
+
+  hud.update(boat.state, wind);
+  // location readout: nearest named island (checked ~2x per second)
+  if ((perfT - lastLocCheck) > 0.5) {
+    lastLocCheck = perfT;
+    let best = null, bd = 1e9;
+    for (const i of archipelago.islands) {
+      if (!i.name) continue;
+      const d = Math.hypot(i.x - boat.state.pos.x, i.z - boat.state.pos.z) - i.R;
+      if (d < bd) { bd = d; best = i; }
+    }
+    hud.setLocation(best && bd < 900 ? (bd < 90 ? best.name : 'near ' + best.name) : 'open sea');
+  }
+  audio.setSpeed(boat.state.speed);
+  composer.render();
+
+  if (firstFrame) {
+    firstFrame = false;
+    const l = document.getElementById('loader');
+    if (l) { l.classList.add('hidden'); setTimeout(() => l.remove(), 1400); }
+  }
+}
+animate();

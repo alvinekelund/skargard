@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Skärgård — Sail the Finnish Archipelago</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: #0a0d14; font-family: ui-sans-serif, system-ui, sans-serif; }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; }
+
+      .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 5;
+        box-shadow: inset 0 0 200px 30px rgba(8, 10, 16, 0.4); }
+
+      .title { position: fixed; left: 34px; top: 30px; z-index: 6; pointer-events: none;
+        font-family: ui-serif, Georgia, serif; color: rgba(255,250,244,0.95);
+        text-shadow: 0 2px 16px rgba(0,0,0,0.5); opacity: 0; animation: fade 2.5s ease 0.6s forwards; }
+      .title h1 { font-size: clamp(20px, 2.6vw, 30px); font-weight: 500; letter-spacing: 0.01em; }
+      .title p { font-family: ui-monospace, Menlo, monospace; font-size: 10px; letter-spacing: 0.2em;
+        text-transform: uppercase; color: rgba(255,228,200,0.6); margin-top: 6px; }
+
+      /* HUD */
+      .hud { position: fixed; inset: 0; z-index: 6; pointer-events: none;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace; opacity: 0; animation: fade 2s ease 1.6s forwards; }
+      .hud-compass { position: fixed; right: 26px; bottom: 24px; width: 144px; height: 144px;
+        filter: drop-shadow(0 4px 14px rgba(0,0,0,0.35)); }
+      .hud-readout { position: fixed; left: 30px; bottom: 26px; color: rgba(255,255,255,0.92); }
+      .hud-speed { font-size: 40px; font-weight: 600; line-height: 1; letter-spacing: -0.01em;
+        text-shadow: 0 2px 14px rgba(0,0,0,0.5); }
+      .hud-speed .unit { font-size: 15px; font-weight: 400; opacity: 0.6; margin-left: 5px; }
+      .hud-pos { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 7px;
+        color: rgba(255,255,255,0.6); }
+      .hud-loc { font-family: ui-serif, Georgia, serif; font-size: 15px; letter-spacing: 0.06em;
+        margin-top: 6px; color: rgba(255,232,200,0.85); text-shadow: 0 1px 8px rgba(0,0,0,0.5); }
+      .hud-controls { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+        font-size: 11px; letter-spacing: 0.04em; color: rgba(255,255,255,0.42);
+        background: rgba(10,16,24,0.28); padding: 7px 16px; border-radius: 20px;
+        backdrop-filter: blur(6px); white-space: nowrap; }
+      .hud-controls b { color: rgba(255,255,255,0.82); font-weight: 600; }
+
+      @keyframes fade { to { opacity: 1; } }
+
+      #loader { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+        background: radial-gradient(120% 90% at 50% 42%, #20364a 0%, #0e1622 60%, #070a10 100%);
+        transition: opacity 1.2s ease; font-family: ui-monospace, Menlo, monospace; }
+      #loader.hidden { opacity: 0; pointer-events: none; }
+      #loader .ring { width: 42px; height: 42px; border-radius: 50%;
+        border: 2px solid rgba(150,200,255,0.18); border-top-color: rgba(150,200,255,0.9);
+        animation: spin 1s linear infinite; }
+      #loader .lbl { position: absolute; bottom: 38%; color: rgba(170,210,255,0.55);
+        font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="vignette"></div>
+    <div class="title"><h1>Skärgård</h1><p>Sail the Finnish Archipelago</p></div>
+    <div id="loader"><div class="ring"></div><div class="lbl">raising the mainsail…</div></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

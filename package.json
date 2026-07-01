@@ -1,0 +1,18 @@
+{
+  "name": "archipelago-sunset",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A hyperreal real-time Finnish archipelago at golden-hour sunset, in WebGL/Three.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  }
+}
