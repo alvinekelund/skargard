@@ -287,8 +287,22 @@ function polySdf(lx, lz, ring) {
   return inside ? d : -d;
 }
 
-// height from the real shoreline: distance-from-shore rises to a smooth glaciated
-// whaleback crown; height/rise-length scale with island size and kind
+// bilinear sample of a baked EU-DEM height grid (local island coords, dm ints)
+function gridH(g, lx, lz) {
+  const fx = (lx - g.x0) / g.dx, fz = (lz - g.z0) / g.dz;
+  const ix = THREE.MathUtils.clamp(Math.floor(fx), 0, g.nx - 2);
+  const iz = THREE.MathUtils.clamp(Math.floor(fz), 0, g.nz - 2);
+  const tx = THREE.MathUtils.clamp(fx - ix, 0, 1), tz = THREE.MathUtils.clamp(fz - iz, 0, 1);
+  const i00 = iz * g.nx + ix;
+  const v = g.v;
+  return ((v[i00] * (1 - tx) + v[i00 + 1] * tx) * (1 - tz)
+        + (v[i00 + g.nx] * (1 - tx) + v[i00 + g.nx + 1] * tx) * tz) * 0.1;
+}
+
+// height above the real shoreline. Three tiers of honesty:
+//  · grid islands — REAL interior relief (EU-DEM), pinned to 0 at the OSM ring
+//  · e-only islands — REAL peak height scaling a procedural whaleback profile
+//  · unresolved skerries — fully procedural low whaleback (kind/area heuristic)
 function islandHeight(lx, lz, isl) {
   const b = isl.bbox;
   if (lx < b.minX - 24 || lx > b.maxX + 24 || lz < b.minZ - 24 || lz > b.maxZ + 24) return -8;
@@ -296,7 +310,13 @@ function islandHeight(lx, lz, isl) {
   if (s <= 0) return Math.max(s * 0.55, -8.0) - 0.05;      // gentle submerged apron
   const dome = Math.pow(THREE.MathUtils.smoothstep(s, 0, isl.S), 0.62);
   const cx = isl.x, cz = isl.z;
-  let h = dome * isl.H;
+  let h;
+  if (isl.grid) {
+    const shore = THREE.MathUtils.smoothstep(s, 0, 15);    // DEM bleeds at 25 m — pin the coast
+    h = Math.max(gridH(isl.grid, lx, lz) * shore, dome * 0.9); // land stays above water
+  } else {
+    h = dome * isl.H;
+  }
   h += fbm((lx + cx) * 0.09 + (lz + cz) * 0.02, (lz + cz) * 0.09, 3) * 0.3 * dome; // soft swells
   h += fbm((lx + cx) * 0.32, (lz + cz) * 0.32, 2) * 0.1 * dome;                     // fine texture
   return h - 0.05;
@@ -449,12 +469,17 @@ export function buildArchipelago(scene, env, mapData, realData) {
     }
     const A = rec.a, kind = rec.k;
     const lg = Math.log10(Math.max(A / 300, 1));
-    const H = kind === 'bald' ? 0.7 + 0.4 * lg : kind === 'sparse' ? 1.2 + 1.2 * lg : 2.2 + 1.6 * lg;
+    // REAL max height (EU-DEM, baked in dm) when the raster resolved the island;
+    // otherwise the old kind/area heuristic — flagged so the data overlay can tell
+    const e = rec.e ? rec.e / 10 : 0;
+    const H = e > 0 ? Math.max(e, 0.7)
+      : kind === 'bald' ? 0.7 + 0.4 * lg : kind === 'sparse' ? 1.2 + 1.2 * lg : 2.2 + 1.6 * lg;
     islands.push({
       x: cx, z: cz, ring, bbox: { minX, minZ, maxX, maxZ },
       A, R: Math.sqrt(A / Math.PI), H,
       S: THREE.MathUtils.clamp(Math.sqrt(A) * 0.14, 4, 30),
       kind, name: rec.n || null,
+      realElev: e > 0, grid: rec.g || null,
     });
   }
 
@@ -473,8 +498,10 @@ export function buildArchipelago(scene, env, mapData, realData) {
   let geoParts = [];
   let treeBudget = 6500;
 
+  const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
     const { x: cx, z: cz, bbox, H, kind } = isl;
+    let tp = performance.now();
     const M = 14;                                     // underwater apron margin
     const w = bbox.maxX - bbox.minX + M * 2, d = bbox.maxZ - bbox.minZ + M * 2;
     const segX = THREE.MathUtils.clamp(Math.round(w * 0.5), 8, 140);
@@ -486,6 +513,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) pos.setY(i, islandHeight(pos.getX(i), pos.getZ(i), isl));
     geo.computeVertexNormals();
+    perf.mesh += performance.now() - tp; tp = performance.now();
 
     const nrm = geo.attributes.normal;
     const colors = new Float32Array(pos.count * 3);
@@ -521,6 +549,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.translate(cx, 0, cz);                          // into world space for the merge
     geoParts.push(geo);
+    perf.color += performance.now() - tp; tp = performance.now();
 
     const treeRng = mulberry32(Math.floor((cx + 9999) * 53 + (cz + 9999) * 131));
     const bw = bbox.maxX - bbox.minX, bd = bbox.maxZ - bbox.minZ;
@@ -597,6 +626,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
       boulderMats.push(_m.clone());
       bp++;
     }
+    perf.scatter += performance.now() - tp;
   }
 
   // shared depth materials so alpha-tested canopies cast needle-shaped shadows
@@ -645,6 +675,8 @@ export function buildArchipelago(scene, env, mapData, realData) {
   }
 
   function rebuild(cx0, cz0) {
+    const t0 = performance.now();
+    perf.mesh = perf.color = perf.scatter = 0;
     disposeActive();
     geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = [];
     treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
@@ -726,6 +758,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
     };
     propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region });
     activeGroup.add(propsRef.group);
+    console.debug(`[rebuild] ${(performance.now() - t0).toFixed(0)}ms — mesh ${perf.mesh.toFixed(0)} · color ${perf.color.toFixed(0)} · scatter ${perf.scatter.toFixed(0)} · islands ${activeSet.length}`);
   }
 
   // max terrain height at a world point — used for boat↔island collision.
