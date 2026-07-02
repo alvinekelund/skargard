@@ -24,6 +24,8 @@ const COL = {
   heathG: new THREE.Color(0x6d6e48), // olive heath grass
   heather:new THREE.Color(0x8a6470), // dusty heather bloom (mauve-rust)
   heathBr:new THREE.Color(0x836b4c), // rusty heath
+  floor:  new THREE.Color(0x44502d), // mossy forest floor (under real wood polys)
+  scrubG: new THREE.Color(0x4b5a38), // grey-green juniper scrub carpet
   pine:   new THREE.Color(0x1f3a1e),
   pineDk: new THREE.Color(0x122610),
   juniper:new THREE.Color(0x36482e), // low dark-green shore bush
@@ -339,6 +341,15 @@ function nameSprite(text) {
   return spr;
 }
 
+// is a world point inside any of the land-cover entries ({p: ring, minX..maxZ})?
+function inCover(list, x, z) {
+  for (const n of list) {
+    if (x < n.minX || x > n.maxX || z < n.minZ || z > n.maxZ) continue;
+    if (inRing(x, z, n.p)) return true;
+  }
+  return false;
+}
+
 // point-in-polygon (ring = [[x,z],...], world coords)
 export function inRing(x, z, r) {
   let inside = false;
@@ -517,7 +528,11 @@ export function buildArchipelago(scene, env, mapData, realData) {
 
     const nrm = geo.attributes.normal;
     const colors = new Float32Array(pos.count * 3);
-    const tmp = new THREE.Color();
+    const tmp = new THREE.Color(), hc = new THREE.Color();
+    // REAL land cover paints the ground: OSM wood → forest floor, heath → heather
+    // carpet (Jurmo), scrub → juniper green. Unmapped ground keeps the procedural
+    // granite/heath heuristic — most tiny skerries genuinely are bare rock.
+    const hasCoverPolys = isl._wood.length + isl._heath.length + isl._scrub.length > 0;
     for (let i = 0; i < pos.count; i++) {
       const lx = pos.getX(i), y = pos.getY(i), lz = pos.getZ(i);
       const slope = nrm.getY(i);
@@ -531,17 +546,36 @@ export function buildArchipelago(scene, env, mapData, realData) {
         const surf = THREE.MathUtils.smoothstep(y, 0.02, 0.1) * (1 - THREE.MathUtils.smoothstep(y, 0.14, 0.26));
         tmp.lerp(COL.foam, surf * grain * 0.3);
       } else {
+        let cover = 0;                               // 0 unmapped · 1 wood · 2 heath · 3 scrub
+        if (hasCoverPolys) {
+          const wx = lx + cx, wz = lz + cz;
+          if (inCover(isl._wood, wx, wz)) cover = 1;
+          else if (inCover(isl._heath, wx, wz)) cover = 2;
+          else if (inCover(isl._scrub, wx, wz)) cover = 3;
+        }
         const streak = fbm((lx + cx) * 0.3, (lz + cz) * 0.04, 2) * 0.5 + 0.5; // glaciated striae
         tmp.copy(COL.granite).lerp(COL.pink, grain * 0.6);
         tmp.lerp(COL.grey, THREE.MathUtils.smoothstep(streak, 0.55, 0.85) * 0.45);
         tmp.lerp(COL.lichen, THREE.MathUtils.smoothstep(patch, 0.62, 0.88) * THREE.MathUtils.clamp(slope, 0, 1) * 0.4);
-        // heather + juniper heath carpets the flatter ground — the Jurmo signature
-        const heathMask = THREE.MathUtils.smoothstep(slope, 0.72, 0.94) * THREE.MathUtils.smoothstep(y, 0.28, 1.1) * (0.55 + patch * 0.45);
         const bloom = fbm((lx + cx) * 0.22, (lz + cz) * 0.22, 3) * 0.5 + 0.5;
-        const heath = COL.heathG.clone()
-          .lerp(COL.heathBr, THREE.MathUtils.smoothstep(bloom, 0.32, 0.58))
-          .lerp(COL.heather, THREE.MathUtils.smoothstep(bloom, 0.58, 0.86));
-        tmp.lerp(heath, heathMask * 0.92);
+        if (cover === 1) {
+          // mapped forest: mossy floor + humus, rock pokes through on steep faces
+          hc.copy(COL.floor).lerp(COL.moss, THREE.MathUtils.smoothstep(bloom, 0.4, 0.8) * 0.6);
+          tmp.lerp(hc, (0.55 + patch * 0.3) * THREE.MathUtils.smoothstep(slope, 0.55, 0.8));
+        } else if (cover === 3) {
+          // mapped scrub: continuous grey-green juniper carpet
+          hc.copy(COL.scrubG).lerp(COL.juniper, THREE.MathUtils.smoothstep(bloom, 0.35, 0.75) * 0.5);
+          tmp.lerp(hc, (0.5 + patch * 0.25) * THREE.MathUtils.smoothstep(slope, 0.55, 0.8));
+        } else {
+          // heather + juniper heath carpets the flatter ground — the Jurmo signature.
+          // Where OSM maps real heath, the carpet is near-total instead of a heuristic.
+          let heathMask = THREE.MathUtils.smoothstep(slope, 0.72, 0.94) * THREE.MathUtils.smoothstep(y, 0.28, 1.1) * (0.55 + patch * 0.45);
+          if (cover === 2) heathMask = Math.max(heathMask, 0.85 * THREE.MathUtils.smoothstep(slope, 0.55, 0.8));
+          hc.copy(COL.heathG)
+            .lerp(COL.heathBr, THREE.MathUtils.smoothstep(bloom, 0.32, 0.58))
+            .lerp(COL.heather, THREE.MathUtils.smoothstep(bloom, 0.58, 0.86));
+          tmp.lerp(hc, heathMask * 0.92);
+        }
       }
       tmp.offsetHSL(0, 0, (grain - 0.5) * 0.05);
       colors[i*3]=tmp.r; colors[i*3+1]=tmp.g; colors[i*3+2]=tmp.b;
@@ -569,13 +603,9 @@ export function buildArchipelago(scene, env, mapData, realData) {
         const y = islandHeight(lx, lz, isl);
         if (y < 0.9 || y > H + 1.0) continue;
         if (hasWood) {                             // the REAL forest boundary decides
-          let inWood = false;
-          for (const w of isl._wood) if (inRing(cx + lx, cz + lz, w)) { inWood = true; break; }
-          if (!inWood) continue;
+          if (!inCover(isl._wood, cx + lx, cz + lz)) continue;
         } else if (hasHeath) {
-          let inHeath = false;
-          for (const hp of isl._heath) if (inRing(cx + lx, cz + lz, hp)) { inHeath = true; break; }
-          if (inHeath) continue;                   // mapped heath stays treeless
+          if (inCover(isl._heath, cx + lx, cz + lz)) continue; // mapped heath stays treeless
         }
         const e = 0.6;
         const dy = Math.hypot(
@@ -695,14 +725,15 @@ export function buildArchipelago(scene, env, mapData, realData) {
     if (activeSet.length > MAX_ISLANDS) activeSet = activeSet.slice(0, MAX_ISLANDS);
 
     for (const isl of activeSet) {
-      // real land cover intersecting this island (world-coord polygons)
-      isl._wood = []; isl._heath = [];
+      // real land cover intersecting this island (world-coord polygons w/ bbox)
+      isl._wood = []; isl._heath = []; isl._scrub = [];
       const bx0 = isl.x + isl.bbox.minX, bx1 = isl.x + isl.bbox.maxX;
       const bz0 = isl.z + isl.bbox.minZ, bz1 = isl.z + isl.bbox.maxZ;
       for (const n of nature) {
         if (n.maxX < bx0 || n.minX > bx1 || n.maxZ < bz0 || n.minZ > bz1) continue;
-        if (n.c === 0) isl._wood.push(n.p);
-        else if (n.c === 1) isl._heath.push(n.p);
+        if (n.c === 0) isl._wood.push(n);
+        else if (n.c === 1) isl._heath.push(n);
+        else if (n.c === 2) isl._scrub.push(n);
       }
       buildIsland(isl);
     }
