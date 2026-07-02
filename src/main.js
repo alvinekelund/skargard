@@ -18,6 +18,7 @@ import { buildArchipelago } from './archipelago.js';
 import { createBoat } from './boat.js';
 import { createHUD } from './hud.js';
 import { createAudio } from './audio.js';
+import { createChart } from './map.js';
 
 /* ── renderer / scene / camera ── */
 const container = document.getElementById('app');
@@ -41,17 +42,28 @@ const mapData = await (await fetch('/archipelago_map.json')).json();
 const archipelago = buildArchipelago(scene, env, mapData);
 const boat = createBoat(scene);
 
-// spawn in open water off Utö, bow pointed toward Jurmo
+// spawn in open water off Utö, bow pointed toward Jurmo, and stream that region in
 {
   const uto = archipelago.islands.find((i) => i.name === 'Utö');
   const jurmo = archipelago.islands.find((i) => i.name === 'Jurmo');
   if (uto) {
-    let sx = uto.x + uto.bbox.maxX + 60, sz = uto.z;
-    for (let n = 0; n < 30 && archipelago.heightAt(sx, sz) > -1.2; n++) sx += 30;
+    let sx = uto.x + uto.bbox.maxX + 120, sz = uto.z;
+    for (let n = 0; n < 40 && archipelago.heightAt(sx, sz) > -1.2; n++) sx += 40;
     boat.state.pos.set(sx, 0, sz);
     boat.state.heading = jurmo ? Math.atan2(jurmo.x - sx, jurmo.z - sz) : Math.PI;
   }
+  archipelago.rebuild(boat.state.pos.x, boat.state.pos.z);
 }
+
+/* ── the chart (M): pan/zoom the whole real Archipelago Sea, click to sail there ── */
+const chart = createChart(mapData, {
+  getBoat: () => boat.state,
+  onTeleport: (x, z) => {
+    boat.state.pos.set(x, 0, z);
+    boat.state.speed = Math.min(boat.state.speed, 1);
+    archipelago.rebuild(x, z);
+  },
+});
 
 /* ── wind (blows TOWARD windDir; slowly shifts) ── */
 const wind = { dir: new THREE.Vector3(Math.sin(2.2), 0, Math.cos(2.2)).normalize(), speed: 0.8, baseHeading: 2.2 };
@@ -72,6 +84,7 @@ addEventListener('keydown', (e) => {
   if (keymap[e.code]) { input[keymap[e.code]] = true; e.preventDefault(); }
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
+  if (e.code === 'KeyM') chart.toggle();
 });
 addEventListener('keyup', (e) => { if (keymap[e.code]) { input[keymap[e.code]] = false; e.preventDefault(); } });
 
@@ -171,7 +184,7 @@ addEventListener('resize', () => {
 const hud = createHUD();
 
 // dev hook for inspection
-window.__game = { boat, env, wind, input, camera, THREE, archipelago, bloom, grade, renderer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
+window.__game = { boat, env, wind, input, camera, THREE, archipelago, chart, bloom, grade, renderer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
 
 /* ── loop ── */
 const clock = new THREE.Clock();
@@ -188,6 +201,12 @@ function animate() {
 
   boat.update(dt, { input, windDir: wind.dir, windSpeed: wind.speed, waveHeightAt: env.waveHeightAt, landHeightAt: archipelago.heightAt, time: perfT });
   archipelago.update(dt, perfT, camera, env.sunDir);
+  // stream the next region in as the boat sails on (brief hitch, ~every 1.2 km)
+  {
+    const c = archipelago.activeCenter;
+    const ddx = boat.state.pos.x - c.x, ddz = boat.state.pos.z - c.y;
+    if (ddx * ddx + ddz * ddz > 1200 * 1200) archipelago.rebuild(boat.state.pos.x, boat.state.pos.z);
+  }
   env.update(dt, perfT, boat.state.pos);
   grade.uniforms.uTime.value = perfT;
 

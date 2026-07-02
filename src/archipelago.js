@@ -418,7 +418,7 @@ export function buildArchipelago(scene, env, mapData) {
   const juniperGeo = juniperGeometry(mulberry32(3));
   const boulderGeo = boulderGeometry(mulberry32(4));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
-  const pineMats = [], birchMats = [], juniperMats = [], boulderMats = [];
+  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
   // ── islands from the REAL chart: every polygon is an actual island outline
@@ -447,15 +447,17 @@ export function buildArchipelago(scene, env, mapData) {
     });
   }
 
-  const geoParts = [];
-  for (const isl of islands) buildIsland(isl);
+  // the world is 60×55 km at 1:1 — only the region around the boat is built;
+  // rebuild() streams a new region in when the boat moves or teleports
+  let geoParts = [];
+  let treeBudget = 6500;
 
   function buildIsland(isl) {
     const { x: cx, z: cz, bbox, H, kind } = isl;
     const M = 14;                                     // underwater apron margin
     const w = bbox.maxX - bbox.minX + M * 2, d = bbox.maxZ - bbox.minZ + M * 2;
-    const segX = THREE.MathUtils.clamp(Math.round(w * 0.85), 10, 190);
-    const segZ = THREE.MathUtils.clamp(Math.round(d * 0.85), 10, 190);
+    const segX = THREE.MathUtils.clamp(Math.round(w * 0.5), 8, 140);
+    const segZ = THREE.MathUtils.clamp(Math.round(d * 0.5), 8, 140);
     const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const ox = (bbox.minX + bbox.maxX) / 2, oz = (bbox.minZ + bbox.maxZ) / 2;
@@ -506,9 +508,10 @@ export function buildArchipelago(scene, env, mapData) {
     // ONLY proper forested islands carry trees. Small skerries are bare granite
     // with at most a little juniper scrub — never trees (that's the un-Finnish tell).
     if (kind === 'forest') {
-      const target = Math.min(Math.floor(isl.A * 0.03), 420);
+      const target = Math.min(Math.floor(isl.A * 0.004), 800, treeBudget);
+      treeBudget -= target;
       let placed = 0, tries = 0;
-      while (placed < target && tries < target * 14) {
+      while (placed < target && tries < target * 8) {
         tries++;
         const [lx, lz] = samp();
         const y = islandHeight(lx, lz, isl);
@@ -532,7 +535,7 @@ export function buildArchipelago(scene, env, mapData) {
     // low juniper + heather scrub — the heath that carpets these islands
     const jtarget = Math.min(Math.floor(isl.A * (kind === 'bald' ? 0.011 : kind === 'sparse' ? 0.02 : 0.008)), 240);
     let jp = 0, jt = 0;
-    while (jp < jtarget && jt < jtarget * 12) {
+    while (jp < jtarget && jt < jtarget * 8) {
       jt++;
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
@@ -549,7 +552,7 @@ export function buildArchipelago(scene, env, mapData) {
     // scattered moraine boulders (Jurmo's "stone kingdom") on the bare rocks
     const btarget = Math.min(Math.floor(isl.A * (kind === 'forest' ? 0.003 : 0.008)), 160);
     let bp = 0, bt = 0;
-    while (bp < btarget && bt < btarget * 12) {
+    while (bp < btarget && bt < btarget * 8) {
       bt++;
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
@@ -564,78 +567,130 @@ export function buildArchipelago(scene, env, mapData) {
     }
   }
 
-  // one merged mesh for all 550+ islands → a single draw call (plus one shadow pass)
-  {
-    const merged = BufferGeometryUtils.mergeGeometries(geoParts, false);
-    const mesh = new THREE.Mesh(merged, islandMat);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    group.add(mesh);
-  }
+  // shared depth materials so alpha-tested canopies cast needle-shaped shadows
+  const depthNeedle = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: needleTex, alphaTest: 0.45 });
+  const depthLeaf = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: leafTex, alphaTest: 0.38 });
 
-  // instanced vegetation — trunk + canopy pairs share the same matrices; alpha-tested
-  // canopies need a matching depth material so their shadows are needle-shaped too
-  function makeInstanced(geo, mat, mats, { cast = true, alphaMap = null, alphaTest = 0 } = {}) {
+  // ── streaming region state ──
+  const RBUILD = 3500;                    // metres of world built around the boat
+  const REBUILD_AT = 1200;                // rebuild when the boat strays this far
+  const MAX_ISLANDS = 550;                // densest inner-archipelago cap
+  const activeGroup = new THREE.Group();
+  group.add(activeGroup);
+  let activeSet = [];
+  let landmark = null;
+  const activeCenter = new THREE.Vector2(1e9, 1e9);
+
+  function disposeActive() {
+    for (const o of [...activeGroup.children]) {
+      o.traverse((c) => {
+        if (c.isMesh || c.isSprite || c.isLine) {
+          if (c.geometry && !c.geometry.__shared) c.geometry.dispose();
+          const mats = Array.isArray(c.material) ? c.material : [c.material];
+          for (const m of mats) {
+            if (m && !m.__shared) { if (m.map && !m.map.__shared) m.map.dispose(); m.dispose(); }
+          }
+        }
+        if (c.isInstancedMesh) c.dispose();
+      });
+      activeGroup.remove(o);
+    }
+  }
+  // shared assets must survive dispose
+  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const t of [needleTex, leafTex, rockD, rockN, rockR]) t.__shared = true;
+  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo]) g.__shared = true;
+
+  function makeInstanced(geo, mat, mats, depthMat = null) {
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(mats.length, 1));
     mats.forEach((m, i) => mesh.setMatrixAt(i, m)); mesh.count = mats.length;
     mesh.instanceMatrix.needsUpdate = true; mesh.frustumCulled = false;
-    mesh.castShadow = cast; mesh.receiveShadow = true;
-    if (alphaMap) mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: alphaMap, alphaTest });
-    group.add(mesh);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    if (depthMat) mesh.customDepthMaterial = depthMat;
+    activeGroup.add(mesh);
     return mesh;
   }
-  makeInstanced(pineGeo.trunk, trunkMat, pineMats);
-  makeInstanced(pineGeo.canopy, pineMat, pineMats, { alphaMap: needleTex, alphaTest: 0.45 });
-  makeInstanced(birchGeo.trunk, trunkMat, birchMats);
-  makeInstanced(birchGeo.canopy, birchMat, birchMats, { alphaMap: leafTex, alphaTest: 0.4 });
-  makeInstanced(juniperGeo, juniperMat, juniperMats, { alphaMap: leafTex, alphaTest: 0.35 });
-  makeInstanced(boulderGeo, boulderMat, boulderMats);
 
-  // ── the REAL Utö: Finland's oldest lighthouse + its pilot village, on the
-  //    actual Utö island from the chart ──
-  let landmark = null;
-  const uto = islands.find((i) => i.name === 'Utö') || islands.find((i) => i.kind !== 'bald');
-  if (uto) {
-    // put the tower on the island's high ground
-    const hrng = mulberry32(123);
-    let bx = 0, bz = 0, by = islandHeight(0, 0, uto);
-    for (let n = 0; n < 60; n++) {
-      const lx = uto.bbox.minX + hrng() * (uto.bbox.maxX - uto.bbox.minX);
-      const lz = uto.bbox.minZ + hrng() * (uto.bbox.maxZ - uto.bbox.minZ);
-      const y = islandHeight(lx, lz, uto);
-      if (y > by) { by = y; bx = lx; bz = lz; }
+  function rebuild(cx0, cz0) {
+    disposeActive();
+    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = [];
+    treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
+    landmark = null;
+    activeCenter.set(cx0, cz0);
+
+    // islands whose bbox touches the build square, nearest first
+    activeSet = [];
+    for (const i of islands) {
+      const dx = Math.max(Math.abs(i.x - cx0) - (i.bbox.maxX - i.bbox.minX) / 2, 0);
+      const dz = Math.max(Math.abs(i.z - cz0) - (i.bbox.maxZ - i.bbox.minZ) / 2, 0);
+      if (dx < RBUILD && dz < RBUILD) activeSet.push(i);
     }
-    const tower = buildLighthouse();
-    tower.position.set(uto.x + bx, by - 0.4, uto.z + bz);
-    tower.traverse((o) => { if (o.isMesh && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
-    group.add(tower);
-    landmark = tower.userData;
-    let houses = 0;
-    for (let n = 0; n < 90 && houses < 8; n++) {
-      const lx = uto.bbox.minX + hrng() * (uto.bbox.maxX - uto.bbox.minX);
-      const lz = uto.bbox.minZ + hrng() * (uto.bbox.maxZ - uto.bbox.minZ);
-      const hy = islandHeight(lx, lz, uto);
-      if (hy < 0.8 || Math.hypot(lx - bx, lz - bz) > 90) continue;
-      const house = buildHouse(hrng);
-      house.position.set(uto.x + lx, hy - 0.1, uto.z + lz);
-      house.rotation.y = hrng() * Math.PI * 2;
-      house.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-      group.add(house);
-      houses++;
+    activeSet.sort((a, b) =>
+      ((a.x - cx0) ** 2 + (a.z - cz0) ** 2) - ((b.x - cx0) ** 2 + (b.z - cz0) ** 2));
+    if (activeSet.length > MAX_ISLANDS) activeSet = activeSet.slice(0, MAX_ISLANDS);
+
+    for (const isl of activeSet) buildIsland(isl);
+
+    // one merged mesh for the whole region → a single draw call
+    if (geoParts.length) {
+      const merged = BufferGeometryUtils.mergeGeometries(geoParts, false);
+      const mesh = new THREE.Mesh(merged, islandMat);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      activeGroup.add(mesh);
+    }
+    makeInstanced(pineGeo.trunk, trunkMat, pineMats);
+    makeInstanced(pineGeo.canopy, pineMat, pineMats, depthNeedle);
+    makeInstanced(birchGeo.trunk, trunkMat, birchMats);
+    makeInstanced(birchGeo.canopy, birchMat, birchMats, depthLeaf);
+    makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf);
+    makeInstanced(boulderGeo, boulderMat, boulderMats);
+
+    // the REAL Utö: Finland's oldest lighthouse + pilot village — when in range
+    const uto = activeSet.find((i) => i.name === 'Utö');
+    if (uto) {
+      const hrng = mulberry32(123);
+      let bx = 0, bz = 0, by = islandHeight(0, 0, uto);
+      for (let n = 0; n < 80; n++) {
+        const lx = uto.bbox.minX + hrng() * (uto.bbox.maxX - uto.bbox.minX);
+        const lz = uto.bbox.minZ + hrng() * (uto.bbox.maxZ - uto.bbox.minZ);
+        const y = islandHeight(lx, lz, uto);
+        if (y > by) { by = y; bx = lx; bz = lz; }
+      }
+      const tower = buildLighthouse();
+      tower.position.set(uto.x + bx, by - 0.4, uto.z + bz);
+      tower.traverse((o) => { if (o.isMesh && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
+      activeGroup.add(tower);
+      landmark = tower.userData;
+      let houses = 0;
+      for (let n = 0; n < 200 && houses < 8; n++) {
+        const lx = uto.bbox.minX + hrng() * (uto.bbox.maxX - uto.bbox.minX);
+        const lz = uto.bbox.minZ + hrng() * (uto.bbox.maxZ - uto.bbox.minZ);
+        const hy = islandHeight(lx, lz, uto);
+        if (hy < 0.8 || Math.hypot(lx - bx, lz - bz) > 220) continue;
+        const house = buildHouse(hrng);
+        house.position.set(uto.x + lx, hy - 0.1, uto.z + lz);
+        house.rotation.y = hrng() * Math.PI * 2;
+        house.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        activeGroup.add(house);
+        houses++;
+      }
+    }
+
+    // floating name labels for the region's major islands
+    const named = activeSet.filter((i) => i.name).sort((a, b) => b.A - a.A).slice(0, 12);
+    for (const isl of named) {
+      const spr = nameSprite(isl.name);
+      spr.position.set(isl.x, isl.H + 14, isl.z);
+      activeGroup.add(spr);
     }
   }
 
-  // floating name labels over the major islands (real chart names)
-  const named = islands.filter((i) => i.name).sort((a, b) => b.A - a.A).slice(0, 10);
-  for (const isl of named) {
-    const spr = nameSprite(isl.name);
-    spr.position.set(isl.x, isl.H + 11, isl.z);
-    group.add(spr);
-  }
-
-  // max terrain height at a world point — used for boat↔island collision
+  // max terrain height at a world point — used for boat↔island collision.
+  // Uses the active region when built (the boat is always inside it).
   function heightAt(x, z) {
     let m = -10;
-    for (const i of islands) {
+    const pool = activeSet.length ? activeSet : islands;
+    for (const i of pool) {
       const lx = x - i.x, lz = z - i.z;
       const b = i.bbox;
       if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
@@ -667,5 +722,8 @@ export function buildArchipelago(scene, env, mapData) {
     }
   }
 
-  return { group, update, islands, heightAt };
+  return {
+    group, update, islands, heightAt, rebuild,
+    get activeCenter() { return activeCenter; },
+  };
 }

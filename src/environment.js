@@ -17,12 +17,17 @@ export const PRESETS = {
     bloom: { strength: 0.25, radius: 0.4, threshold: 1.1 },
   },
   golden: {
-    sunElev: 3.5, sunAz: 162, turbidity: 3.5, rayleigh: 4.0, mie: 0.005, g: 0.85, exposure: 0.42,
+    // sun at 2.0° kisses the treeline: max path extinction = amber disc + rose band.
+    // rayleigh 4.4 deepens the horizon rose AND the blue aloft; turbidity 4.2 gives
+    // the warm mie glow-cone without whole-sky milk; g .87 keeps the halo tight.
+    sunElev: 2.0, sunAz: 162, turbidity: 4.2, rayleigh: 4.4, mie: 0.0045, g: 0.87, exposure: 0.42,
     sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x6c7fd8, hemiGround: 0x2e2a3e, hemiInt: 0.3,
     ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xe08055, fogDensity: 0.0009,
     waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
-    cloudWarm: 0xff9e5a, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.65, cloudElevHi: false,
-    bloom: { strength: 0.5, radius: 0.6, threshold: 1.0 },
+    cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.65, cloudElevHi: false,
+    cloudSize: [1800, 3600],
+    // threshold >= 1.25: only true HDR (sun disc + glints) blooms, never the halo
+    bloom: { strength: 0.18, radius: 0.55, threshold: 1.25 },
   },
 };
 
@@ -274,6 +279,9 @@ export function createEnvironment(scene, renderer) {
     if (follow) {
       water.position.x = follow.x; water.position.z = follow.z;
       skirt.position.x = follow.x; skirt.position.z = follow.z;
+      // the sky dome and cloud band ride along too — the world is 60 km wide at 1:1
+      sky.position.x = follow.x; sky.position.z = follow.z;
+      cloudGroup.position.x = follow.x; cloudGroup.position.z = follow.z;
       // shadow frustum rides along with the boat so nearby land always has shadows
       sunLight.target.position.set(follow.x, 0, follow.z);
       sunLight.position.copy(sunDir).multiplyScalar(900).add(sunLight.target.position);
