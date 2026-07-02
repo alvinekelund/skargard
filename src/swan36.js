@@ -12,6 +12,39 @@
 // ============================================================================
 import * as THREE from 'three';
 
+// shared flutter uniforms — boat.js drives these once per frame; the sails flog
+// in the shader (three incommensurate sines, amplitude growing toward the leech)
+export const sailUniforms = { uTime: { value: 0 }, uFlap: { value: 0 } };
+
+function makeSailMaterial(phase = 0) {
+  const m = new THREE.MeshStandardMaterial({ color: 0xf2eee2, roughness: 0.9, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = sailUniforms.uTime;
+    sh.uniforms.uFlap = sailUniforms.uFlap;
+    sh.uniforms.uPhase = { value: phase };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform float uTime, uFlap, uPhase;
+        attribute vec2 aSail;                       // x: 0 luff → 1 leech · y: 0 foot → 1 head
+        float flogW(vec2 s, float t) {              // ≈ cloth flog, 3–7.5 Hz
+          return sin(19.0*t + 9.0*s.x + 5.0*s.y)
+               + 0.55*sin(31.0*t + 14.0*s.x + 2.7*s.y)
+               + 0.30*sin(47.0*t - 7.0*s.x);
+        }`)
+      .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
+        { float e0 = smoothstep(0.12, 1.0, aSail.x); // lighting shimmer, no CPU normals
+          objectNormal.z += uFlap * 0.6 * e0 * cos(19.0*(uTime+uPhase) + 9.0*aSail.x + 5.0*aSail.y);
+          objectNormal = normalize(objectNormal); }`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        { float t = uTime + uPhase;
+          float edge = smoothstep(0.12, 1.0, aSail.x);   // amplitude grows toward the leech
+          float span = 1.0 - 0.65 * aSail.y;             // calmer toward the head
+          transformed.z += uFlap * 0.28 * edge * span * flogW(aSail, t);
+          transformed.x -= uFlap * 0.05 * edge * sin(23.0*t + 6.0*aSail.y); }`);
+  };
+  return m;
+}
+
 export function buildSwan36({ withSails = true } = {}) {
 
   // --------------------------------------------------------------------------
@@ -281,7 +314,7 @@ export function buildSwan36({ withSails = true } = {}) {
   // (straight luff, quadratic-bezier leech) with a sine belly so they read as
   // cloth, not cardboard. All points given as (x, y) in the centreline plane.
   const V2 = (x, y) => new THREE.Vector2(x, y);
-  function sailMesh(tack, head, clew, leechCtrl, belly) {
+  function sailMesh(tack, head, clew, leechCtrl, belly, phase = 0) {
     const R = 16, K = 10;
     const leech = new THREE.QuadraticBezierCurve(clew, leechCtrl, head);
     const rings = [];
@@ -300,18 +333,24 @@ export function buildSwan36({ withSails = true } = {}) {
       }
       rings.push(row);
     }
-    return new THREE.Mesh(loftRings(rings), MAT.sail);
+    const geo = loftRings(rings);
+    // tag each vertex with (luff→leech, foot→head) for the flutter shader
+    const sailUV = new Float32Array((R + 1) * (K + 1) * 2);
+    let n = 0;
+    for (let i = 0; i <= R; i++) for (let j = 0; j <= K; j++) { sailUV[n++] = j / K; sailUV[n++] = i / R; }
+    geo.setAttribute('aSail', new THREE.BufferAttribute(sailUV, 2));
+    return new THREE.Mesh(geo, makeSailMaterial(phase));
   }
   const sails = new THREE.Group();
   sails.name = 'sails';
   if (withSails) {
     const main = sailMesh(V2(1.66, 2.14), V2(1.66, 14.30),   // tack, head on mast
                           V2(-1.78, 2.14), V2(-0.90, 8.50),  // clew at boom end, roached leech
-                          0.18);
+                          0.18, 0.0);
     main.name = 'mainsail';
     const jib = sailMesh(V2(5.30, 1.18), V2(1.70, 14.40),    // tack at stem, head at masthead
                          V2(0.55, 1.55), V2(1.45, 8.10),     // clew, slightly hollow leech
-                         0.30);
+                         0.30, 1.7);                         // de-synced so they never flog in lockstep
     jib.name = 'genoa';
     sails.add(main, jib);
   }

@@ -19,6 +19,7 @@ import { createBoat } from './boat.js';
 import { createHUD } from './hud.js';
 import { createAudio } from './audio.js';
 import { createChart } from './map.js';
+import { createGustField } from './wind.js';
 
 /* ── renderer / scene / camera ── */
 const container = document.getElementById('app');
@@ -65,8 +66,11 @@ const chart = createChart(mapData, {
   },
 });
 
-/* ── wind (blows TOWARD windDir; slowly shifts) ── */
-const wind = { dir: new THREE.Vector3(Math.sin(2.2), 0, Math.cos(2.2)).normalize(), speed: 0.8, baseHeading: 2.2 };
+/* ── wind (blows TOWARD windDir; slowly shifts; gusts ride on top) ── */
+const wind = { dir: new THREE.Vector3(Math.sin(2.2), 0, Math.cos(2.2)).normalize(), speed: 0.8, baseHeading: 2.2, gust: 0 };
+const gusts = createGustField(1337);
+const shake = { t: 9, amp: 0 };
+function triggerShake(a) { shake.t = 0; shake.amp = a; }
 
 /* ── audio (starts on first interaction, per autoplay policy) ── */
 const audio = createAudio();
@@ -85,6 +89,10 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
   if (e.code === 'KeyM') chart.toggle();
+  if (e.code === 'KeyE') {
+    boat.state.motorOn = !boat.state.motorOn;
+    if (!boat.state.motorOn) boat.state.throttle = 0;
+  }
 });
 addEventListener('keyup', (e) => { if (keymap[e.code]) { input[keymap[e.code]] = false; e.preventDefault(); } });
 
@@ -195,11 +203,20 @@ function animate() {
   perfT = clock.getElapsedTime();
 
   // wind slowly shifts heading + breathes in strength
-  wind.baseHeading += Math.sin(perfT * 0.05) * 0.0015;
-  wind.dir.set(Math.sin(wind.baseHeading), 0, Math.cos(wind.baseHeading)).normalize();
-  wind.speed = 0.78 + Math.sin(perfT * 0.13) * 0.18;
+  // living wind: slow wander + breathing base + gust field (veer rides each puff)
+  const G = gusts.update(perfT, dt);
+  wind.baseHeading += Math.sin(perfT * 0.05) * 0.09 * dt;
+  const gustHeading = wind.baseHeading + G.veer;
+  wind.dir.set(Math.sin(gustHeading), 0, Math.cos(gustHeading)).normalize();
+  const breathe = 0.78 + 0.18 * Math.sin(perfT * 0.13);
+  wind.speed = Math.min(breathe * (1 + G.strength * G.env) * (1 + G.texture), 1.40);
+  wind.gust = G.env;
 
-  boat.update(dt, { input, windDir: wind.dir, windSpeed: wind.speed, waveHeightAt: env.waveHeightAt, landHeightAt: archipelago.heightAt, time: perfT });
+  boat.update(dt, { input, windDir: wind.dir, windSpeed: wind.speed, gust: wind.gust, waveHeightAt: env.waveHeightAt, landHeightAt: archipelago.heightAt, time: perfT });
+  if (boat.state.event) {
+    triggerShake(boat.state.event.type === 'gybe' ? boat.state.event.mag : 0.25);
+    boat.state.event = null;
+  }
   archipelago.update(dt, perfT, camera, env.sunDir);
   // stream the next region in as the boat sails on (brief hitch, ~every 1.2 km)
   {
@@ -214,6 +231,15 @@ function animate() {
   else if (camMode === 'pov') updatePOV(dt);
   else if (camMode === 'orbit') { orbit.target.copy(boat.group.position); orbit.update(); }
   // 'free' → leave the camera wherever it was placed
+
+  // boom-slam shake: a short decaying two-sine buzz, applied after the camera solve
+  if (shake.t < 0.35) {
+    shake.t += dt;
+    const k = Math.exp(-shake.t * 9) * shake.amp;
+    camera.rotation.z += 0.010 * k * Math.sin(shake.t * 55);
+    camera.rotation.x += 0.006 * k * Math.sin(shake.t * 41 + 1.7);
+    camera.position.y += 0.06 * k * Math.sin(shake.t * 33);
+  }
 
   hud.update(boat.state, wind);
   // location readout: nearest named island (checked ~2x per second)
