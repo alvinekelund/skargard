@@ -96,78 +96,88 @@ function gull() {
   return g;
 }
 
-export function buildProps({ activeSet, islandHeight, heightAt, center }) {
+export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
   const dyn = { buoys: [], traffic: [], gulls: [] };
 
   const big = activeSet.filter((i) => i.A > 40000);
 
-  // ── lateral marks in the channels between big islands ──
-  let buoyCount = 0;
-  for (let a = 0; a < big.length && buoyCount < 14; a++) {
-    for (let b = a + 1; b < big.length && buoyCount < 14; b++) {
-      const A = big[a], B = big[b];
-      const dx = B.x - A.x, dz = B.z - A.z;
-      const gap = Math.hypot(dx, dz) - (A.R + B.R);
-      if (gap < 60 || gap > 700) continue;
-      const mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
-      if (heightAt(mx, mz) > -2.5) continue;                     // needs real water
-      const green = (buoyCount % 2) === 0;
-      const buoy = sparBuoy(green);
-      buoy.position.set(mx, 0, mz);
-      group.add(buoy);
-      dyn.buoys.push(buoy);
-      buoyCount++;
+  // ── the REAL charted seamarks (OSM seamark:* = the actual fairway system) ──
+  // 0 port-red · 1 stbd-green · 2-5 cardinals N/E/S/W · 6 special/danger · 7 light
+  const CARD = {
+    2: ['#1c1c1c', '#e8c520'],   // north: black over yellow
+    3: ['#1c1c1c', '#e8c520'],
+    4: ['#e8c520', '#1c1c1c'],   // south: yellow over black
+    5: ['#e8c520', '#1c1c1c'],
+  };
+  let marks = 0;
+  for (const [mx, mz, tt] of (region.seamarks || [])) {
+    if (marks >= 90) break;
+    if (heightAt(mx, mz) > -0.8) continue;               // keep marks off the rocks
+    let m;
+    if (tt === 0 || tt === 1) m = sparBuoy(tt === 1);
+    else if (tt >= 2 && tt <= 5) {
+      m = new THREE.Group();
+      const [topC, botC] = CARD[tt];
+      const bot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 1.4, 7),
+        new THREE.MeshStandardMaterial({ color: botC, roughness: 0.5 }));
+      bot.position.y = 0.6;
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 1.2, 7),
+        new THREE.MeshStandardMaterial({ color: topC, roughness: 0.5 }));
+      top.position.y = 1.9;
+      m.add(bot, top);
+    } else if (tt === 7) {
+      m = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 3.4, 7), M.white);
+      post.position.y = 1.4;
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0xffcf66, emissiveIntensity: 1.4 }));
+      lamp.position.y = 3.3;
+      m.add(post, lamp);
+    } else {
+      m = sparBuoy(false);
+      m.children[0].material = M.white;
     }
+    m.position.set(mx, 0, mz);
+    group.add(m);
+    dyn.buoys.push(m);
+    marks++;
   }
 
-  // ── harbours + cottages on the named/forested islands ──
-  let harbours = 0;
-  const settled = activeSet.filter((i) => (i.name && i.A > 120000) || (i.kind === 'forest' && i.A > 200000));
-  for (const isl of settled.slice(0, 6)) {
-    const irng = mulberry32(Math.floor(isl.x * 31 + isl.z * 17));
-    // find a shore vertex with deep water just outside
-    let shore = null, out = null;
-    for (let n = 0; n < 30 && !shore; n++) {
-      const v = isl.ring[Math.floor(irng() * isl.ring.length)];
-      const vx = isl.x + v[0], vz = isl.z + v[1];
-      const away = Math.atan2(vx - isl.x, vz - isl.z);
-      const ox = vx + Math.sin(away) * 14, oz = vz + Math.cos(away) * 14;
-      if (heightAt(ox, oz) < -1.6 && islandHeight(v[0], v[1], isl) > -0.6) { shore = [vx, vz]; out = away; }
-    }
-    if (!shore) continue;
+  // ── the REAL buildings (OSM footprints: position, size, orientation, class) ──
+  let placed = 0;
+  for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
+    if (placed >= 350) break;
+    const ground = heightAt(bx, bz);
+    if (ground < -1.2) continue;                          // skip footprints over open water
+    const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
+    const h = cls === 2 ? 5.5 : cls === 1 ? 2.1 : 2.9;
+    const wall = cls === 2 ? M.white : (rng2() < 0.72 ? M.falunRed : (rng2() < 0.5 ? M.greyWall : M.white));
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bw, h, bd), wall);
+    body.position.y = h / 2; g.add(body);
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, Math.hypot(bw, bd) * 0.42, h * 0.55, 4), M.roof);
+    roof.rotation.y = Math.PI / 4; roof.position.y = h + h * 0.27; g.add(roof);
+    g.position.set(bx, Math.max(ground, 0.25) - 0.06, bz);
+    g.rotation.y = ang;
+    group.add(g);
+    placed++;
+  }
 
-    if (harbours < 2 && isl.name && irng() < 0.8) {
-      // a small guest harbour: dock running out to sea + boathouse + rowboats
-      const d = dock(11 + irng() * 6);
-      d.position.set(shore[0], 0, shore[1]);
-      d.rotation.y = out + Math.PI;                              // deck runs seaward
-      group.add(d);
-      const bh = house(irng, false);
-      const bx = shore[0] - Math.sin(out) * 7, bz = shore[1] - Math.cos(out) * 7;
-      bh.position.set(bx, Math.max(islandHeight(bx - isl.x, bz - isl.z, isl), 0.3), bz);
-      bh.rotation.y = out;
-      group.add(bh);
-      const rb = rowboat(irng);
-      rb.position.set(shore[0] + Math.sin(out + 1.4) * 3.4, 0, shore[1] + Math.cos(out + 1.4) * 3.4);
-      rb.rotation.y = out + 0.4;
-      group.add(rb);
-      dyn.buoys.push(rb);                                        // bobs like a buoy
-      harbours++;
-    } else if (isl.kind === 'forest' && irng() < 0.75) {
-      // a summer cottage clearing
-      for (let c = 0, placed = 0; c < 40 && placed < 2; c++) {
-        const lx = isl.bbox.minX + irng() * (isl.bbox.maxX - isl.bbox.minX);
-        const lz = isl.bbox.minZ + irng() * (isl.bbox.maxZ - isl.bbox.minZ);
-        const y = islandHeight(lx, lz, isl);
-        if (y < 1.0 || y > 3.2) continue;
-        const c1 = house(irng, false);
-        c1.position.set(isl.x + lx, y - 0.08, isl.z + lz);
-        c1.rotation.y = irng() * Math.PI * 2;
-        group.add(c1);
-        placed++;
-      }
+  // ── the REAL piers (OSM man_made=pier polylines) ──
+  let segs = 0;
+  for (const line of (region.piers || [])) {
+    if (segs >= 380) break;
+    for (let i = 0; i < line.length - 1 && segs < 380; i++) {
+      const [x1, z1] = line[i], [x2, z2] = line[i + 1];
+      const L = Math.hypot(x2 - x1, z2 - z1);
+      if (L < 0.8 || L > 120) continue;
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.22, L), M.wood);
+      seg.position.set((x1 + x2) / 2, 0.55, (z1 + z2) / 2);
+      seg.rotation.y = Math.atan2(x2 - x1, z2 - z1);
+      group.add(seg);
+      segs++;
     }
   }
 
@@ -182,10 +192,6 @@ export function buildProps({ activeSet, islandHeight, heightAt, center }) {
       const y = islandHeight(lx, lz, uto);
       if (y > hy) { hy = y; hx = lx; hz = lz; }
     }
-    const pilot = house(urng, true);
-    pilot.traverse((o) => { if (o.isMesh && o.material === M.falunRed) o.material = M.white; });
-    pilot.position.set(uto.x + hx + 26, Math.max(hy - 0.6, 0.4), uto.z + hz + 14);
-    group.add(pilot);
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.3, 16, 6), M.steel);
     mast.position.set(uto.x + hx - 20, hy + 8, uto.z + hz - 8);
     group.add(mast);

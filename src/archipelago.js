@@ -319,7 +319,17 @@ function nameSprite(text) {
   return spr;
 }
 
-export function buildArchipelago(scene, env, mapData) {
+// point-in-polygon (ring = [[x,z],...], world coords)
+export function inRing(x, z, r) {
+  let inside = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    if (((r[i][1] > z) !== (r[j][1] > z)) &&
+        (x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0])) inside = !inside;
+  }
+  return inside;
+}
+
+export function buildArchipelago(scene, env, mapData, realData) {
   const group = new THREE.Group();
   scene.add(group);
   const shaders = [];
@@ -448,6 +458,16 @@ export function buildArchipelago(scene, env, mapData) {
     });
   }
 
+  // real land cover: wood/forest (c=0), heath (1), scrub (2) — with bboxes
+  const nature = (realData && realData.nature ? realData.nature : []).map((n) => {
+    let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
+    for (const [x, z] of n.p) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    return { c: n.c, p: n.p, minX, minZ, maxX, maxZ };
+  });
+
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
@@ -508,8 +528,10 @@ export function buildArchipelago(scene, env, mapData) {
 
     // ONLY proper forested islands carry trees. Small skerries are bare granite
     // with at most a little juniper scrub — never trees (that's the un-Finnish tell).
-    if (kind === 'forest') {
-      const target = Math.min(Math.floor(isl.A * 0.004), 800, treeBudget);
+    const hasWood = isl._wood && isl._wood.length > 0;
+    const hasHeath = isl._heath && isl._heath.length > 0;
+    if (kind === 'forest' || hasWood) {
+      const target = Math.min(Math.floor(isl.A * 0.004) + (hasWood ? 200 : 0), 800, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -517,6 +539,15 @@ export function buildArchipelago(scene, env, mapData) {
         const [lx, lz] = samp();
         const y = islandHeight(lx, lz, isl);
         if (y < 0.9 || y > H + 1.0) continue;
+        if (hasWood) {                             // the REAL forest boundary decides
+          let inWood = false;
+          for (const w of isl._wood) if (inRing(cx + lx, cz + lz, w)) { inWood = true; break; }
+          if (!inWood) continue;
+        } else if (hasHeath) {
+          let inHeath = false;
+          for (const hp of isl._heath) if (inRing(cx + lx, cz + lz, hp)) { inHeath = true; break; }
+          if (inHeath) continue;                   // mapped heath stays treeless
+        }
         const e = 0.6;
         const dy = Math.hypot(
           islandHeight(lx+e,lz,isl) - islandHeight(lx-e,lz,isl),
@@ -631,7 +662,18 @@ export function buildArchipelago(scene, env, mapData) {
       ((a.x - cx0) ** 2 + (a.z - cz0) ** 2) - ((b.x - cx0) ** 2 + (b.z - cz0) ** 2));
     if (activeSet.length > MAX_ISLANDS) activeSet = activeSet.slice(0, MAX_ISLANDS);
 
-    for (const isl of activeSet) buildIsland(isl);
+    for (const isl of activeSet) {
+      // real land cover intersecting this island (world-coord polygons)
+      isl._wood = []; isl._heath = [];
+      const bx0 = isl.x + isl.bbox.minX, bx1 = isl.x + isl.bbox.maxX;
+      const bz0 = isl.z + isl.bbox.minZ, bz1 = isl.z + isl.bbox.maxZ;
+      for (const n of nature) {
+        if (n.maxX < bx0 || n.minX > bx1 || n.maxZ < bz0 || n.minZ > bz1) continue;
+        if (n.c === 0) isl._wood.push(n.p);
+        else if (n.c === 1) isl._heath.push(n.p);
+      }
+      buildIsland(isl);
+    }
 
     // one merged mesh for the whole region → a single draw call
     if (geoParts.length) {
@@ -663,19 +705,7 @@ export function buildArchipelago(scene, env, mapData) {
       tower.traverse((o) => { if (o.isMesh && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } });
       activeGroup.add(tower);
       landmark = tower.userData;
-      let houses = 0;
-      for (let n = 0; n < 200 && houses < 8; n++) {
-        const lx = uto.bbox.minX + hrng() * (uto.bbox.maxX - uto.bbox.minX);
-        const lz = uto.bbox.minZ + hrng() * (uto.bbox.maxZ - uto.bbox.minZ);
-        const hy = islandHeight(lx, lz, uto);
-        if (hy < 0.8 || Math.hypot(lx - bx, lz - bz) > 220) continue;
-        const house = buildHouse(hrng);
-        house.position.set(uto.x + lx, hy - 0.1, uto.z + lz);
-        house.rotation.y = hrng() * Math.PI * 2;
-        house.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        activeGroup.add(house);
-        houses++;
-      }
+      // (the village is now the REAL one, placed from OSM building footprints)
     }
 
     // floating name labels for the region's major islands
@@ -687,7 +717,14 @@ export function buildArchipelago(scene, env, mapData) {
     }
 
     // life: buoys marking channels, harbours, cottages, traffic, gulls, Utö extras
-    propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter });
+    const RB = RBUILD;
+    const inBox = (x, z) => Math.abs(x - cx0) < RB && Math.abs(z - cz0) < RB;
+    const region = {
+      buildings: (realData?.buildings || []).filter((b) => inBox(b[0], b[1])),
+      piers: (realData?.piers || []).filter((pl) => inBox(pl[0][0], pl[0][1])),
+      seamarks: (realData?.seamarks || []).filter((m) => inBox(m[0], m[1])),
+    };
+    propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region });
     activeGroup.add(propsRef.group);
   }
 

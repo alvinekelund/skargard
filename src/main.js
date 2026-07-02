@@ -40,7 +40,9 @@ camera.position.set(0, 12, 24);
 const env = createEnvironment(scene, renderer);
 // the REAL Archipelago Sea: 550+ actual island outlines (OSM) around Utö–Jurmo
 const mapData = await (await fetch('/archipelago_map.json')).json();
-const archipelago = buildArchipelago(scene, env, mapData);
+// real buildings, piers, charted seamarks and land cover (OSM/NLS-derived)
+const realData = await (await fetch('/archipelago_data.json')).json();
+const archipelago = buildArchipelago(scene, env, mapData, realData);
 const boat = createBoat(scene);
 
 // spawn in open water off Utö, bow pointed toward Jurmo, and stream that region in
