@@ -23,6 +23,8 @@ const M = {
   sail: new THREE.MeshStandardMaterial({ color: 0xf1eee6, roughness: 0.85, side: THREE.DoubleSide }),
   steel: new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.6, roughness: 0.4 }),
   gull: new THREE.MeshBasicMaterial({ color: 0x1a1518, side: THREE.DoubleSide }),
+  cardBlack: new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.5 }),
+  cardYellow: new THREE.MeshStandardMaterial({ color: 0xe8c520, roughness: 0.5 }),
 };
 // shared across region rebuilds — the streaming dispose pass must skip these
 Object.values(M).forEach((m) => { m.__shared = true; });
@@ -105,11 +107,14 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
 
   // ── the REAL charted seamarks (OSM seamark:* = the actual fairway system) ──
   // 0 port-red · 1 stbd-green · 2-5 cardinals N/E/S/W · 6 special/danger · 7 light
+  // IALA cardinal bands top→bottom, and double-cone topmarks:
+  //   N black/yellow ▲▲ · E black/yellow/black ▲▼ · S yellow/black ▼▼ · W yellow/black/yellow ▼▲
+  const B = M.cardBlack, Y = M.cardYellow;
   const CARD = {
-    2: ['#1c1c1c', '#e8c520'],   // north: black over yellow
-    3: ['#1c1c1c', '#e8c520'],
-    4: ['#e8c520', '#1c1c1c'],   // south: yellow over black
-    5: ['#e8c520', '#1c1c1c'],
+    2: { bands: [B, Y], cones: [1, 1] },
+    3: { bands: [B, Y, B], cones: [1, -1] },
+    4: { bands: [Y, B], cones: [-1, -1] },
+    5: { bands: [Y, B, Y], cones: [-1, 1] },
   };
   let marks = 0;
   for (const [mx, mz, tt] of (region.seamarks || [])) {
@@ -119,14 +124,20 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     if (tt === 0 || tt === 1) m = sparBuoy(tt === 1);
     else if (tt >= 2 && tt <= 5) {
       m = new THREE.Group();
-      const [topC, botC] = CARD[tt];
-      const bot = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 1.4, 7),
-        new THREE.MeshStandardMaterial({ color: botC, roughness: 0.5 }));
-      bot.position.y = 0.6;
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 1.2, 7),
-        new THREE.MeshStandardMaterial({ color: topC, roughness: 0.5 }));
-      top.position.y = 1.9;
-      m.add(bot, top);
+      const { bands, cones } = CARD[tt];
+      const H = 2.6, bh = H / bands.length;
+      bands.forEach((mat, bi) => {
+        const y0 = H - bh * (bi + 0.5);                  // bands listed top→bottom
+        const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.11 + bi * 0.012, 0.115 + bi * 0.012, bh, 7), mat);
+        seg.position.y = y0;
+        m.add(seg);
+      });
+      cones.forEach((dir, ci) => {                       // topmarks are always black
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.26, 7), M.cardBlack);
+        cone.position.y = H + 0.5 - ci * 0.34;
+        if (dir < 0) cone.rotation.x = Math.PI;
+        m.add(cone);
+      });
     } else if (tt === 7) {
       m = new THREE.Group();
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 3.4, 7), M.white);
@@ -254,5 +265,5 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
   }
 
-  return { group, update };
+  return { group, update, counts: { seamarks: marks, buildings: placed, pierSegs: segs } };
 }

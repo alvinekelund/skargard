@@ -135,12 +135,18 @@ def main():
         xs, zs = XX.ravel(), ZZ.ravel()
         m = pip_mask(xs, zs, ring)
         if not m.any():
-            xs, zs = np.array([0.0]), np.array([0.0])   # centroid fallback
+            # the vertex centroid can sit OUTSIDE a concave ring — never sample sea
+            # and call it the island's height; unsampleable islands stay procedural
+            if not pip_mask(np.zeros(1), np.zeros(1), ring)[0]:
+                rec.pop("e", None); rec.pop("g", None)
+                continue
+            xs, zs = np.zeros(1), np.zeros(1)
         else:
             xs, zs = xs[m], zs[m]
         h = np.clip(tiles.sample_world(xs + cx, zs + cz), 0.0, CLIP_MAX)
         hmax = float(np.percentile(h, 95))
         if hmax < MIN_REAL:
+            rec.pop("e", None); rec.pop("g", None)      # keep re-runs idempotent
             continue                                    # unresolvable → stays procedural
 
         rec["e"] = int(round(hmax * 10))

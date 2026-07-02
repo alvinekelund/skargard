@@ -40,7 +40,7 @@ camera.position.set(0, 12, 24);
 const env = createEnvironment(scene, renderer);
 // the REAL Archipelago Sea: 550+ actual island outlines (OSM) around Utö–Jurmo
 const mapData = await (await fetch('/archipelago_map.json')).json();
-// real buildings, piers, charted seamarks and land cover (OSM/NLS-derived)
+// real buildings, piers, charted seamarks and land cover (OSM)
 const realData = await (await fetch('/archipelago_data.json')).json();
 const archipelago = buildArchipelago(scene, env, mapData, realData);
 const boat = createBoat(scene);
@@ -94,6 +94,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
   if (e.code === 'KeyM') chart.toggle();
+  if (e.code === 'KeyI') hud.setDebug(archipelago.setDebug(!archipelago.debugOn));
   if (e.code === 'KeyE') {
     boat.state.motorOn = !boat.state.motorOn;
     if (!boat.state.motorOn) boat.state.throttle = 0;
@@ -257,6 +258,7 @@ function animate() {
       if (d < bd) { bd = d; best = i; }
     }
     hud.setLocation(best && bd < 900 ? (bd < 90 ? best.name : 'near ' + best.name) : 'open sea');
+    if (archipelago.debugOn) hud.setDebug(archipelago.debugInfo);   // counts follow the streamed region
   }
   audio.setSpeed(boat.state.speed);
   composer.render();

@@ -28,9 +28,37 @@ export function createHUD() {
       <div class="hud-loc">—</div>
     </div>
     <div class="hud-controls">
-      <b>←→</b> steer · <b>↑↓</b> <span class="ctl-trim">trim sail</span> · <b>E</b> engine · <b>C</b> camera · <b>M</b> chart · <b>T</b> time
+      <b>←→</b> steer · <b>↑↓</b> <span class="ctl-trim">trim sail</span> · <b>E</b> engine · <b>C</b> camera · <b>M</b> chart · <b>T</b> time · <b>I</b> data
     </div>`;
   document.body.appendChild(root);
+
+  // ── data-provenance panel (D): what in view is real data vs procedural ──
+  const dataPanel = document.createElement('div');
+  dataPanel.style.cssText = [
+    'position:fixed', 'top:16px', 'right:16px', 'max-width:340px', 'padding:12px 14px',
+    'background:rgba(8,14,20,0.82)', 'border:1px solid rgba(255,255,255,0.14)', 'border-radius:6px',
+    'font:11px/1.65 ui-monospace,monospace', 'color:rgba(255,255,255,0.85)', 'display:none',
+    'z-index:30', 'pointer-events:none', 'white-space:pre-wrap',
+  ].join(';');
+  document.body.appendChild(dataPanel);
+
+  function setDebug(info) {
+    if (!info) { dataPanel.style.display = 'none'; return; }
+    const sw = (c) => `<span style="color:${c}">■</span>`;
+    dataPanel.innerHTML =
+      `<b style="letter-spacing:0.08em">DATA IN THIS REGION</b>\n` +
+      `<b style="color:#9fd8a4">real (OSM / EU-DEM)</b>\n` +
+      `${sw('#2fd6c4')}${sw('#ff9b45')} ${info.islands} island outlines — all real OSM coastline\n` +
+      `${sw('#2fd6c4')} elevation measured on ${info.measured} (${info.gridded} with interior relief grid, EU-DEM ~25 m)\n` +
+      `${sw('#ff9b45')} ${info.islands - info.measured} skerries below raster resolution → procedural height\n` +
+      `${sw('#46d95e')} ${info.wood} wood ${sw('#c46bd4')} ${info.heath} heath ${sw('#e0cf4a')} ${info.scrub} scrub polygons drive ground + trees\n` +
+      `· buildings ${info.buildings}/${info.buildingsTotal} · pier segments ${info.pierSegs}/${info.pierSegsTotal} · seamarks ${info.seamarks}/${info.seamarksTotal} — rendered / in region data (render caps 350/380/90)\n` +
+      `<b style="color:#f0b28a">procedural</b>\n` +
+      `· island height PROFILES between shore and peak · bathymetry\n` +
+      `· rock texture, tree/boulder models + placement (inside real polygons)\n` +
+      `· water, waves, weather`;
+    dataPanel.style.display = 'block';
+  }
 
   // ── compass ──
   const wrap = document.createElement('div');
@@ -129,5 +157,5 @@ export function createHUD() {
     }
   }
 
-  return { root, update, setLocation };
+  return { root, update, setLocation, setDebug };
 }

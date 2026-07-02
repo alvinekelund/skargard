@@ -6,8 +6,8 @@ scale: **7,462 actual island outlines** from OpenStreetMap with their real names
 Google-Maps-style chart to drop in anywhere. You helm a procedurally lofted
 **Nautor Swan 36** — heavy-displacement momentum, gusts that lean her over,
 tacks that carry way, accidental gybes that slam the boom across, sails that
-flog when you pinch — past channel buoys, guest harbours, summer cottages and
-Finland's oldest lighthouse on the real Utö. Real-time WebGL, [Three.js](https://threejs.org).
+flog when you pinch — past the real charted seamarks, real village houses and
+piers, and Finland's oldest lighthouse on the real Utö. Real-time WebGL, [Three.js](https://threejs.org).
 
 ![Skärgård](preview.jpg)
 
@@ -20,7 +20,8 @@ npm run dev      # → http://localhost:5183
 
 **Controls** — `←/→` steer · `↑/↓` trim the sail (throttle under power) · `E` engine ·
 `M` **chart** (pan/zoom the whole real Archipelago Sea, click open water to sail there) ·
-`C` camera (chase → **helm POV** → orbit) · `T` time of day
+`C` camera (chase → **helm POV** → orbit) · `T` time of day ·
+`I` **data overlay** (shows which features come from real data vs procedural, with rendered-vs-total counts)
 
 ## How it feels
 
@@ -34,24 +35,49 @@ npm run dev      # → http://localhost:5183
   sun path, and a wake that widens and brightens with speed *and* throws a skidding
   wash outboard when you turn hard. The HUD names where you are (real chart names).
 - **The chart is real**: every island is an actual OSM coastline polygon from the
-  outer Archipelago Sea (bbox around 59.8°N 21.5°E, uniformly compressed 0.28×),
-  rebaked via `public/archipelago_map.json`. Jurmo is the big treeless heath it
-  really is; the lighthouse and pilot village stand on the real Utö.
+  outer Archipelago Sea at true 1:1 scale (bbox 59.70–60.20°N, 21.15–22.35°E),
+  baked to `public/archipelago_map.json`. Jurmo is the big treeless heath it
+  really is; the lighthouse and the real village stand on the real Utö.
+
+## What's real, what's procedural
+
+Press `I` in game to see this live: teal shoreline rings have measured elevation,
+orange ones are procedural; green/violet/yellow polygons are the mapped land cover.
+
+**Real data** (all free/open):
+- **7,462 island outlines** with names — OSM coastline polygons (© OpenStreetMap
+  contributors, ODbL), 1:1 scale.
+- **Island heights** — Copernicus **EU-DEM (~25 m)** via the AWS Open Data terrain
+  tiles, baked per island by [`tools/bake_elevation.py`](tools/bake_elevation.py):
+  4,405 islands carry a real measured peak height, the 241 largest a coarse
+  interior relief grid (Jurmo's long moraine back, Utö's lighthouse hill). Only
+  tiny scalars live in git — no rasters.
+- **7,326 building footprints** (position, size, orientation, class), **1,094
+  piers**, **760 charted seamarks** with correct IALA types (lateral, all four
+  cardinals, lights) — OSM.
+- **1,812 land-cover polygons** (wood / heath / scrub) — OSM. They decide both the
+  ground colour (forest floor, heather carpet, juniper) and where trees may grow;
+  mapped heath such as Jurmo stays treeless because the data says so.
+
+**Still procedural** (honestly): the height *profile* between shore and peak on
+islands without a relief grid, everything below the waterline (bathymetry), the
+rock texture, tree/boulder models and their placement *inside* the real polygons,
+and the water, waves and weather. The next accuracy step would be the NLS 2 m
+laser DEM and orthophoto-derived ground masks — deliberately not faked here.
 
 ## How it's made
 
 One coherent light drives the whole scene; everything below shares it.
 
-- **The archipelago** is the heart of it, modelled on the real outer Archipelago Sea
-  (**Jurmo** and **Utö**). Each skerry is a **domain-warped union of metaballs** (never a
-  radial dome — that's the tell that reads as a "snowy mound"), with height from the field
-  so the islands are low, flat, glacier-smoothed granite whalebacks (H/R ≈ 0.05–0.12).
-  ~100 islands cluster into shoals with navigable channels: mostly bare-rock skerries
-  carpeted in **heather heath and low horizontal juniper** (Jurmo) with scattered moraine
-  boulders, trees only on the bigger forested islands and the two landmasses — and a
-  **Utö-style lighthouse** (red-and-white striped tower, green dome, flashing light) above
-  a little red-and-white pilot village as a landmark. You can't sail through islands —
-  the hull grounds on the rock and slides along the shore.
+- **The archipelago** is the heart of it: every island is its real OSM outline,
+  lifted by a distance-from-shore profile to its real EU-DEM height (or bilinearly
+  through its real relief grid), so the islands are the low, glacier-smoothed
+  granite whalebacks they actually are. Bare-rock skerries are carpeted in
+  **heather heath and low horizontal juniper** (Jurmo) with scattered moraine
+  boulders, trees only inside mapped forest — and Finland's oldest lighthouse
+  (red-and-white striped tower, green dome, flashing light) stands over the real
+  village on the real Utö. You can't sail through islands — the hull grounds on
+  the rock and slides along the shore.
 - **Granite** is real PBR rock: triplanar-mapped colour/normal/roughness maps
   (Poly Haven, two noise-blended world-space scales so it never tiles) under the
   vertex-coloured ecological tints — wet-waterline → grey/pink rock → orange lichen →

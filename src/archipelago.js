@@ -674,6 +674,69 @@ export function buildArchipelago(scene, env, mapData, realData) {
   let propsRef = null;
   const activeCenter = new THREE.Vector2(1e9, 1e9);
 
+  // ── data overlay (D): draw exactly what comes from real data ──
+  let debugOn = false;
+  let debugGroup = null;
+  let lastCounts = null;
+  // x-ray lines: no depth test so the data reads through terrain in any light
+  const dbgLine = (color) => new THREE.LineBasicMaterial({
+    color, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const DBG_MAT = {
+    measured: dbgLine(0x2fd6c4),    // teal: EU-DEM-measured height
+    procedural: dbgLine(0xff9b45),  // orange: heuristic height (raster couldn't resolve)
+    wood: dbgLine(0x46d95e),
+    heath: dbgLine(0xc46bd4),
+    scrub: dbgLine(0xe0cf4a),
+  };
+  Object.values(DBG_MAT).forEach((m) => { m.__shared = true; });
+
+  function ringLine(pts, y, mat) {
+    const arr = new Float32Array(pts.length * 3);
+    for (let i = 0; i < pts.length; i++) {
+      arr[i * 3] = pts[i][0];
+      arr[i * 3 + 1] = typeof y === 'function' ? y(pts[i][0], pts[i][1]) : y;
+      arr[i * 3 + 2] = pts[i][1];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+    const line = new THREE.LineLoop(geo, mat);
+    line.renderOrder = 999;
+    return line;
+  }
+
+  function buildDebugOverlay() {
+    debugGroup = new THREE.Group();
+    // every island shoreline IS real OSM — colour says where the HEIGHT comes from
+    for (const isl of activeSet) {
+      const world = isl.ring.map(([x, z]) => [x + isl.x, z + isl.z]);
+      debugGroup.add(ringLine(world, 0.9, isl.realElev ? DBG_MAT.measured : DBG_MAT.procedural));
+    }
+    // real land-cover polygons, draped over the terrain
+    const seen = new Set();
+    for (const isl of activeSet) {
+      for (const [list, mat] of [[isl._wood, DBG_MAT.wood], [isl._heath, DBG_MAT.heath], [isl._scrub, DBG_MAT.scrub]]) {
+        for (const n of list) {
+          if (seen.has(n)) continue;
+          seen.add(n);
+          debugGroup.add(ringLine(n.p, (x, z) => Math.max(heightAt(x, z), 0) + 1.0, mat));
+        }
+      }
+    }
+    activeGroup.add(debugGroup);   // disposeActive cleans it with the region
+  }
+
+  function setDebug(on) {
+    debugOn = on;
+    if (debugGroup) {
+      activeGroup.remove(debugGroup);
+      debugGroup.traverse((c) => { if (c.isLine) c.geometry.dispose(); });
+      debugGroup = null;
+    }
+    if (on) buildDebugOverlay();
+    return on ? lastCounts : null;
+  }
+
   function disposeActive() {
     for (const o of [...activeGroup.children]) {
       o.traverse((c) => {
@@ -789,6 +852,27 @@ export function buildArchipelago(scene, env, mapData, realData) {
     };
     propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region });
     activeGroup.add(propsRef.group);
+
+    // what in this region is measured data vs procedural — feeds the D overlay
+    const cover = new Set();
+    let measured = 0, gridded = 0, coverCounts = { wood: 0, heath: 0, scrub: 0 };
+    for (const isl of activeSet) {
+      if (isl.realElev) measured++;
+      if (isl.grid) gridded++;
+      for (const [list, key] of [[isl._wood, 'wood'], [isl._heath, 'heath'], [isl._scrub, 'scrub']]) {
+        for (const n of list) if (!cover.has(n)) { cover.add(n); coverCounts[key]++; }
+      }
+    }
+    // rendered counts are capped (props.js) — carry the region's TRUE totals too,
+    // so the data panel never passes a render cap off as the amount of real data
+    lastCounts = {
+      islands: activeSet.length, measured, gridded, ...coverCounts, ...propsRef.counts,
+      buildingsTotal: region.buildings.length,
+      pierSegsTotal: region.piers.reduce((a, l) => a + Math.max(l.length - 1, 0), 0),
+      seamarksTotal: region.seamarks.length,
+    };
+    debugGroup = null;                    // the old overlay died with disposeActive
+    if (debugOn) buildDebugOverlay();
     console.debug(`[rebuild] ${(performance.now() - t0).toFixed(0)}ms — mesh ${perf.mesh.toFixed(0)} · color ${perf.color.toFixed(0)} · scatter ${perf.scatter.toFixed(0)} · islands ${activeSet.length}`);
   }
 
@@ -831,7 +915,9 @@ export function buildArchipelago(scene, env, mapData, realData) {
   }
 
   return {
-    group, update, islands, heightAt, rebuild,
+    group, update, islands, heightAt, rebuild, setDebug,
+    get debugOn() { return debugOn; },
+    get debugInfo() { return lastCounts; },
     get activeCenter() { return activeCenter; },
   };
 }
