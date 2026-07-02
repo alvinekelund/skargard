@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeNoise2D, makeFbm, mulberry32 } from './noise.js';
+import { buildProps } from './props.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
    A Finnish skärgård: irregular, LOW, glacier-smoothed granite whaleback
@@ -579,6 +580,7 @@ export function buildArchipelago(scene, env, mapData) {
   group.add(activeGroup);
   let activeSet = [];
   let landmark = null;
+  let propsRef = null;
   const activeCenter = new THREE.Vector2(1e9, 1e9);
 
   function disposeActive() {
@@ -683,6 +685,10 @@ export function buildArchipelago(scene, env, mapData) {
       spr.position.set(isl.x, isl.H + 14, isl.z);
       activeGroup.add(spr);
     }
+
+    // life: buoys marking channels, harbours, cottages, traffic, gulls, Utö extras
+    propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter });
+    activeGroup.add(propsRef.group);
   }
 
   // max terrain height at a world point — used for boat↔island collision.
@@ -707,6 +713,7 @@ export function buildArchipelago(scene, env, mapData) {
     sunViewDir.copy(sunDir).transformDirection(_inv);
     for (const sh of shaders) if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
     for (const sh of islandShaders) if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
+    if (propsRef) propsRef.update(dt, t, env.waveHeightAt);
     // Utö light: four short flashes (Morse "H") then a pause, plus a slow sweeping beam
     if (landmark) {
       const c = t % 5.0; let on = 0;
