@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createWake } from './wake.js';
 import { buildSwan36, sailUniforms } from './swan36.js';
+import { detailSwan36 } from './swan36-detail.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
    A Nautor Swan 36 (S&S, 1967) + a heavy-displacement sailing model.
@@ -56,15 +57,17 @@ export function createBoat(scene) {
 
   // ── the boat: a procedurally lofted Swan 36 floating on her lines (y=0) ──
   const swan = buildSwan36({ withSails: true });
+  detailSwan36(swan);                           // tiller, winches, pulpit, lifelines, rig detail…
   swan.rotation.y = -Math.PI / 2;               // Swan +X (bow) → game +Z (forward)
   group.add(swan);
 
-  // re-rig the boom + mainsail onto a pivot at the mast so the sheet can trim them
+  // re-rig the boom + mainsail (+ its mainsheet/vang gear) onto a pivot at the
+  // mast so the sheet can trim them together
   const MAST_X = 1.60;
   const sailPivot = new THREE.Group();
   sailPivot.position.set(MAST_X, 0, 0);
   swan.add(sailPivot);
-  for (const name of ['boom', 'mainsail']) {
+  for (const name of ['boom', 'mainsail', 'boomGear']) {
     const o = swan.getObjectByName(name);
     if (o) { o.parent.remove(o); o.position.x -= MAST_X; sailPivot.add(o); }
   }
