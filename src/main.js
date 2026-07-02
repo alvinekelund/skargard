@@ -66,8 +66,11 @@ const chart = createChart(mapData, {
   },
 });
 
-/* ── wind (blows TOWARD windDir; slowly shifts; gusts ride on top) ── */
-const wind = { dir: new THREE.Vector3(Math.sin(2.2), 0, Math.cos(2.2)).normalize(), speed: 0.8, baseHeading: 2.2, gust: 0 };
+/* ── wind (blows TOWARD windDir; slowly shifts; gusts ride on top) ──
+   base heading chosen off the spawn course so she starts on a beam reach, drawing */
+const wind = { dir: new THREE.Vector3(), speed: 0.8, baseHeading: boat.state.heading - Math.PI * 0.55, gust: 0 };
+wind.dir.set(Math.sin(wind.baseHeading), 0, Math.cos(wind.baseHeading)).normalize();
+boat.state.speed = 1.6;
 const gusts = createGustField(1337);
 const shake = { t: 9, amp: 0 };
 function triggerShake(a) { shake.t = 0; shake.amp = a; }

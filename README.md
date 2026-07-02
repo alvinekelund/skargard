@@ -1,11 +1,13 @@
 # Skärgård — sail the Finnish archipelago
 
-A relaxing, good-feel sailing game set in the REAL Archipelago Sea: 550+ actual
-island outlines from OpenStreetMap around **Utö and Jurmo**, with their real names,
-Finland's oldest lighthouse on the real Utö, and a procedurally lofted **Nautor
-Swan 36** to sail between them. Real points of sail, heavy-displacement momentum,
-Gerstner waves, and a wake that reacts to how you sail. Built in real-time WebGL
-with [Three.js](https://threejs.org).
+A relaxing, good-feel sailing game set in the REAL Archipelago Sea at true 1:1
+scale: **7,462 actual island outlines** from OpenStreetMap with their real names
+(Utö → Jurmo is the real 12.4 km), streamed around the boat as you sail, with a
+Google-Maps-style chart to drop in anywhere. You helm a procedurally lofted
+**Nautor Swan 36** — heavy-displacement momentum, gusts that lean her over,
+tacks that carry way, accidental gybes that slam the boom across, sails that
+flog when you pinch — past channel buoys, guest harbours, summer cottages and
+Finland's oldest lighthouse on the real Utö. Real-time WebGL, [Three.js](https://threejs.org).
 
 ![Skärgård](preview.jpg)
 
@@ -16,7 +18,9 @@ npm install
 npm run dev      # → http://localhost:5183
 ```
 
-**Controls** — `←/→` steer · `↑/↓` trim the sail · `C` camera (chase → **helm POV** → orbit) · `T` time of day (day / golden hour)
+**Controls** — `←/→` steer · `↑/↓` trim the sail (throttle under power) · `E` engine ·
+`M` **chart** (pan/zoom the whole real Archipelago Sea, click open water to sail there) ·
+`C` camera (chase → **helm POV** → orbit) · `T` time of day
 
 ## How it feels
 
