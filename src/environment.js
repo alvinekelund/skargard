@@ -121,7 +121,7 @@ export function createEnvironment(scene, renderer) {
   // sea — a dense 3000 m tile (7 m vertex spacing so the 26 m wind-sea gets real
   // crests) that follows the boat, with a flat fog-blended horizon skirt beyond.
   const waterShaderRef = { sh: null };
-  const waterNormals = new THREE.TextureLoader().load('/waternormals.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
+  const waterNormals = new THREE.TextureLoader().load(import.meta.env.BASE_URL + 'waternormals.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; });
   const water = new Water(new THREE.PlaneGeometry(3000, 3000, 430, 430), {
     textureWidth: 1024, textureHeight: 1024, waterNormals,
     sunDirection: sunDir.clone(), sunColor: preset.sunWater, waterColor: preset.waterColor,

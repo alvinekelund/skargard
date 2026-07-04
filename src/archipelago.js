@@ -378,9 +378,10 @@ export function buildArchipelago(scene, env, mapData, realData) {
   // ── granite material: triplanar PBR (real rock detail) under the vertex-colour
   //    ecological tints, glossy wet shoreline, animated foam line ──
   const texLoader = new THREE.TextureLoader();
-  const rockD = texLoader.load('/rock_diff.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; });
-  const rockN = texLoader.load('/rock_nor.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; });
-  const rockR = texLoader.load('/rock_rough.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; });
+  const B = import.meta.env.BASE_URL;
+  const rockD = texLoader.load(B + 'rock_diff.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; });
+  const rockN = texLoader.load(B + 'rock_nor.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; });
+  const rockR = texLoader.load(B + 'rock_rough.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; });
 
   const islandShaders = [];
   const islandMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, envMapIntensity: 0.4 });

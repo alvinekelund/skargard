@@ -21,7 +21,7 @@ export function createAudio() {
     speedGain.connect(master);
 
     try {
-      const buf = await (await fetch('/sailing-ambience.mp3')).arrayBuffer();
+      const buf = await (await fetch(import.meta.env.BASE_URL + 'sailing-ambience.mp3')).arrayBuffer();
       const audio = await ctx.decodeAudioData(buf);
       const src = ctx.createBufferSource();
       src.buffer = audio;
