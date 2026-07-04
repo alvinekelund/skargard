@@ -150,6 +150,11 @@ export function detailSwan36(swan, renderer = null) {
     clearcoat: 0.55, clearcoatRoughness: 0.22, envMapIntensity: 0.6,
   });
   const hullMat = gel(0.30);                          // keep boot-stripe bands
+  // DOUBLE-SIDED is load-bearing: a single-sided hull culls its back faces, and
+  // through those culled faces you see straight to the flat sea plane — which
+  // read as an open transom from astern and as water "inside" the boat when
+  // heeled. Rendering both sides seals the shell so the sea never shows through.
+  hullMat.side = THREE.DoubleSide;
   hullMat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vHullY;')
