@@ -431,8 +431,8 @@ export function buildArchipelago(scene, env, mapData, realData) {
           vec2 suv = (vWPos.xz - uSatBox.xy) / uSatBox.zw;
           if (suv.x > 0.002 && suv.x < 0.998 && suv.y > 0.002 && suv.y < 0.998) {
             vec3 sat = texture2D(uSat, suv).rgb;
-            sat *= 1.28;                                   // lift the aerial exposure to match the scene
-            float land = smoothstep(0.12, 0.7, vWPos.y);  // keep the wet granite at the very shore
+            sat = pow(sat * 1.5, vec3(0.92));              // lift the aerial exposure so it reads at dusk too
+            float land = smoothstep(0.1, 0.55, vWPos.y);  // keep the wet granite only at the very shore
             diffuseColor.rgb = mix(diffuseColor.rgb, sat, land * uSatOn);
           }
         }`)

@@ -149,7 +149,7 @@ function connectionVessel() {
 export function createShips(scene) {
   const ships = [];
 
-  function addShip(mesh, route, speed, startFrac, dir, fixedYaw = false, kind = '') {
+  function addShip(model, route, speed, startFrac, dir, fixedYaw = false, kind = '') {
     // arc-length table for steady motion along the polyline
     const seg = [];
     let total = 0;
@@ -157,6 +157,11 @@ export function createShips(scene) {
       const d = Math.hypot(route[i + 1][0] - route[i][0], route[i + 1][1] - route[i][1]);
       seg.push(d); total += d;
     }
+    // the models are built bow at +X, but the motion aligns +Z with the heading —
+    // wrap so the bow points the way she's actually going (no more crabbing sideways)
+    model.rotation.y = -Math.PI / 2;
+    const mesh = new THREE.Group();
+    mesh.add(model);
     mesh.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
     scene.add(mesh);
     ships.push({ mesh, route, seg, total, speed, s: startFrac * total, dir, yaw: 0, init: false, fixedYaw, kind });

@@ -27,6 +27,8 @@ const M = {
   cardYellow: new THREE.MeshStandardMaterial({ color: 0xe8c520, roughness: 0.5 }),
   glass: new THREE.MeshStandardMaterial({ color: 0x33404a, roughness: 0.2, metalness: 0.4 }),
   navy: new THREE.MeshStandardMaterial({ color: 0x24466e, roughness: 0.55 }),
+  stone: new THREE.MeshStandardMaterial({ color: 0x8f8b82, roughness: 0.95 }),   // quay / breakwater
+  plank: new THREE.MeshStandardMaterial({ color: 0xa98a5f, roughness: 0.82 }),   // fresh dock timber
 };
 // shared across region rebuilds — the streaming dispose pass must skip these
 Object.values(M).forEach((m) => { m.__shared = true; });
@@ -69,6 +71,25 @@ function motorboat(rng) {
   ws.position.set(0, 1.0, -0.02); ws.rotation.x = 0.35; g.add(ws); // raked windscreen
   const ob = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.72, 0.34), M.steel);
   ob.position.set(0, 0.32, -1.9); g.add(ob);                       // outboard at the transom
+  return g;
+}
+
+// a small moored sailing yacht (~8 m) — sleek hull, low cabin, bare mast + boom
+// with the main furled, a cousin of the boat you're sailing. bow at +Z.
+function smallSailboat(rng) {
+  const g = new THREE.Group();
+  const hullMat = [M.hullWhite, M.white, M.navy][Math.floor(rng() * 3)];
+  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 4.4, 4, 9), hullMat);
+  hull.scale.set(1, 0.72, 0.42);
+  hull.rotation.x = Math.PI / 2; hull.position.y = 0.34; g.add(hull);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.06, 3.6), M.wood);
+  deck.position.set(0, 0.55, -0.2); g.add(deck);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 1.5), M.white);
+  cabin.position.set(0, 0.74, 0.5); g.add(cabin);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 7.2, 6), M.steel);
+  mast.position.set(0, 4.1, 0.1); g.add(mast);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 2.6, 6), M.sail);  // furled main
+  boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.05, -1.0); g.add(boom);
   return g;
 }
 
@@ -198,18 +219,37 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     placed++;
   }
 
-  // ── the REAL piers (OSM man_made=pier polylines) ──
+  // ── the REAL piers (OSM man_made=pier): short runs → wooden finger docks on
+  //    pilings; long runs → solid stone quays/breakwaters sitting AT the water
+  //    (a 100 m run is a harbour breakwater, not a floating 2 m plank) ──
   let segs = 0;
   for (const line of (region.piers || [])) {
-    if (segs >= 380) break;
-    for (let i = 0; i < line.length - 1 && segs < 380; i++) {
+    if (segs >= 300) break;
+    for (let i = 0; i < line.length - 1 && segs < 300; i++) {
       const [x1, z1] = line[i], [x2, z2] = line[i + 1];
       const L = Math.hypot(x2 - x1, z2 - z1);
-      if (L < 0.8 || L > 120) continue;
-      const seg = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.22, L), M.wood);
-      seg.position.set((x1 + x2) / 2, 0.55, (z1 + z2) / 2);
-      seg.rotation.y = Math.atan2(x2 - x1, z2 - z1);
-      group.add(seg);
+      if (L < 1.0 || L > 200) continue;
+      const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
+      const ang = Math.atan2(x2 - x1, z2 - z1);
+      if (L > 42) {
+        const quay = new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.4, L), M.stone);
+        quay.position.set(cx, 0.4, cz); quay.rotation.y = ang;   // low, wide, on the water
+        group.add(quay);
+      } else {
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, L), M.plank);
+        deck.position.set(cx, 0.5, cz); deck.rotation.y = ang;
+        group.add(deck);
+        const fx = (x2 - x1) / L, fz = (z2 - z1) / L, rx = fz, rz = -fx;
+        const nP = Math.min(Math.max(Math.round(L / 5), 1), 5);
+        for (let p = 0; p <= nP; p++) {
+          const t = p / nP, px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
+          for (const s of [1, -1]) {
+            const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 1.5, 5), M.woodDark);
+            pile.position.set(px + rx * 0.8 * s, -0.15, pz + rz * 0.8 * s);
+            group.add(pile);
+          }
+        }
+      }
       segs++;
     }
   }
@@ -263,22 +303,30 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     dyn.gulls.push(bird);
   }
 
-  // ── small boats moored off the real piers (harbours) ──
+  // ── small boats moored alongside the real piers — the guest harbours ──
   let moored = 0;
   for (const line of (region.piers || [])) {
-    if (moored >= 7) break;
+    if (moored >= 30) break;
     let best = null, bd = 0;                       // seaward pier end = deepest water
     for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
     if (!best || bd < 0.7) continue;
     const [px, pz] = best;
     let dx = px - line[0][0], dz = pz - line[0][1];
     const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
-    const b = rng() < 0.55 ? motorboat(rng) : rowboat(rng);
-    b.position.set(px + dx * 3.5, 0, pz + dz * 3.5);
-    b.rotation.y = Math.atan2(dx, dz) + (rng() - 0.5) * 0.4;
-    group.add(b);
-    dyn.moored.push(b);
-    moored++;
+    const rx = dz, rz = -dx;                               // abeam the pier
+    const nBoats = 1 + Math.floor(rng() * 3);             // 1–3 berthed here
+    for (let k = 0; k < nBoats && moored < 30; k++) {
+      const along = 3 + k * 4.5, side = (k % 2 ? 1 : -1) * (2.6 + rng() * 0.8);
+      const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
+      if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
+      const r = rng();
+      const b = r < 0.4 ? motorboat(rng) : r < 0.72 ? smallSailboat(rng) : rowboat(rng);
+      b.position.set(bx, 0, bz);
+      b.rotation.y = Math.atan2(dx, dz) + (rng() - 0.5) * 0.35;   // roughly along the pier
+      group.add(b);
+      dyn.moored.push(b);
+      moored++;
+    }
   }
 
   // ── a few small boats puttering around the region's open water ──
