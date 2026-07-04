@@ -68,12 +68,14 @@ export function createWake(scene) {
   // wake reacts to speed AND turn: a hard turn throws a wider, brighter skidding
   // wash to the outside of the turn; the ribbon rides the wave surface.
   function update(state, fwd, t, waveH) {
-    const off = 5.6;                                 // stern of the 11 m hull
+    // the wake is born where the hull actually leaves the water — at the counter,
+    // forward of the raked transom on a long-overhang boat — so it stays attached
+    const off = 4.4;
     const sx = state.pos.x - fwd.x * off, sz = state.pos.z - fwd.z * off;
     const skidNow = THREE.MathUtils.clamp(state.turn || 0, 0, 1);
     const side = -Math.sign(state.yawRate || 0);     // wash to the outside of the turn
     const last = pts[pts.length - 1];
-    if (!last || Math.hypot(sx - last.x, sz - last.z) > 0.9) {
+    if (!last || Math.hypot(sx - last.x, sz - last.z) > 0.7) {
       const dist = last ? last.dist + Math.hypot(sx - last.x, sz - last.z) : 0;
       pts.push({ x: sx, z: sz, born: t, spd: state.speed, skid: skidNow, side, dist });
       if (pts.length > MAX) pts.shift();
@@ -83,7 +85,16 @@ export function createWake(scene) {
     for (let i = 0; i < MAX; i++) {
       const k = n - 1 - i;            // newest at i=0, oldest astern
       let cx = sx, cz = sz, px = 0, pz = 0, alpha = 0, vAlong = 0;
-      if (k >= 0) {
+      if (i === 0) {
+        // pin the freshest vertex to the LIVE stern (not the last stored point,
+        // which lags up to a boat-length) so the foam never detaches from the hull
+        cx = sx; cz = sz;
+        px = -fwd.z; pz = fwd.x;                       // width axis = abeam
+        const sp = THREE.MathUtils.clamp(state.speed / 4, 0, 1);
+        const halfW = 0.72 * (0.45 + 0.75 * sp) * (1 + 0.8 * skidNow);
+        alpha = state.speed > 0.05 ? Math.min(0.9, 0.4 + 0.55 * sp + 0.5 * skidNow) : 0;
+        px *= halfW; pz *= halfW;
+      } else if (k >= 0) {
         const p = pts[k];
         cx = p.x; cz = p.z;
         vAlong = d0 - p.dist;         // metres astern → texture rides the water

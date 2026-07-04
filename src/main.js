@@ -148,15 +148,15 @@ function updateChase(dt) {
   camera.updateProjectionMatrix();
 }
 
-// onboard view from aft: sit just behind the transom, high enough to see the
-// whole Swan laid out forward — cockpit, trunk, mast and foredeck. The boat's
+// helm view: sit at the tiller in the aft cockpit and look forward down the
+// whole boat — cockpit, trunk, mast and foredeck laid out ahead. The boat's
 // heel/pitch/heave carry through, but the horizon is partly stabilised for comfort.
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const _povPos = new THREE.Vector3(), _povLook = new THREE.Vector3(), _povUp = new THREE.Vector3();
 function updatePOV(dt) {
   boat.group.updateMatrixWorld();
-  _povPos.set(0, 3.4, -9.5); boat.group.localToWorld(_povPos);    // eye abaft the transom, raised
-  _povLook.set(0, 1.6, 12); boat.group.localToWorld(_povLook);    // look forward down the whole boat
+  _povPos.set(0, 1.62, -3.5); boat.group.localToWorld(_povPos);   // seated eye at the helm
+  _povLook.set(0, 1.15, 9); boat.group.localToWorld(_povLook);    // forward down the deck, slightly down
   _povUp.set(0, 1, 0).applyQuaternion(boat.group.quaternion).lerp(WORLD_UP, 0.45).normalize();
   camera.position.copy(_povPos);
   camera.up.copy(_povUp);

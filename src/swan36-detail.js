@@ -353,13 +353,20 @@ export function detailSwan36(swan, renderer = null) {
   //     it — teak frame, washboard sill, run-back hatch — and furnishes the
   //     saloon behind it: sole, settees, table, shelf, and a warm lamp.
   const cabin = new THREE.Group(); cabin.name = 'cabinInterior';
+  // the cabin is self-lit (warm emissive on every surface) so it always reads as
+  // a cosy lit interior through the open companionway — never a dark void/"hole"
   const IVORY = new THREE.MeshStandardMaterial({
     color: 0xe8e2d2, roughness: 0.9, envMapIntensity: 0.15,
-    emissive: 0x2a1d10, emissiveIntensity: 0.55,   // lamplight bounce — never pitch black below
+    emissive: 0x6a4c28, emissiveIntensity: 1.05,   // warm glow on the joinery
   });
-  const teakIn = new THREE.MeshStandardMaterial({ map: teak, roughness: 0.85, envMapIntensity: 0.1 });
-  const CUSH = new THREE.MeshStandardMaterial({ color: 0x8a4b2e, roughness: 0.95 });   // burnt sienna
-  const DARK = new THREE.MeshStandardMaterial({ color: 0x241c14, roughness: 1.0 });
+  const teakIn = new THREE.MeshStandardMaterial({
+    map: teak, roughness: 0.85, envMapIntensity: 0.1,
+    emissive: 0x3a2410, emissiveIntensity: 0.8,
+  });
+  const CUSH = new THREE.MeshStandardMaterial({
+    color: 0x8a4b2e, roughness: 0.95, emissive: 0x3a1c0e, emissiveIntensity: 0.6,   // burnt sienna
+  });
+  const DARK = new THREE.MeshStandardMaterial({ color: 0x241c14, roughness: 1.0, emissive: 0x140d06, emissiveIntensity: 0.4 });
 
   // the room, built inward-facing (x −1.26 … +1.30, floor 0.90, ceiling 1.29)
   const room = [
@@ -403,9 +410,13 @@ export function detailSwan36(swan, renderer = null) {
   const lampGlow = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0xffd9a0, emissive: 0xffb45e, emissiveIntensity: 2.2 }));
   lampGlow.position.set(1.24, 1.17, 0.30);
-  const lampLight = new THREE.PointLight(0xffb45e, 1.6, 2.8, 1.6);
+  const lampLight = new THREE.PointLight(0xffb45e, 2.4, 3.6, 1.5);
   lampLight.position.set(1.1, 1.15, 0.2);
-  cabin.add(shell, doorway, furniture, woodwork, frame, hatch, lampGlow, lampLight);
+  // a second soft fill just inside the companionway so what you see from the
+  // helm — the near end of the cabin — is lit, not shadowed
+  const hatchFill = new THREE.PointLight(0xffce8c, 1.3, 2.4, 1.8);
+  hatchFill.position.set(-0.7, 1.18, 0);
+  cabin.add(shell, doorway, furniture, woodwork, frame, hatch, lampGlow, lampLight, hatchFill);
   cabin.traverse((o) => { if (o.isMesh && o !== hatch) o.castShadow = false; });
   swan.add(cabin);
 
