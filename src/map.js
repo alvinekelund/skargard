@@ -4,7 +4,8 @@
    there. Toggled with M.
    ─────────────────────────────────────────────────────────────────────────── */
 
-export function createChart(mapData, { getBoat, onTeleport, realData = null, routes = null }) {
+export function createChart(mapData, { getBoat, onTeleport, realData = null, routes = null, getShips = null }) {
+  const SHIP_COL = { viking: '#e0524a', silja: '#5b8fd6', roadferry: '#f2c218', utoline: '#e8b414' };
   const islands = mapData.islands.map((rec) => {
     const pts = rec.p;
     let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
@@ -140,6 +141,30 @@ export function createChart(mapData, { getBoat, onTeleport, realData = null, rou
       ctx.beginPath(); ctx.arc(ux, uz, 6 * devicePixelRatio, 0, Math.PI * 2); ctx.stroke();
     }
 
+    // the ships — live positions, coloured by line, pointing along their heading
+    if (getShips) {
+      for (const s of getShips()) {
+        const px = sx(s.x), pz = sz(s.z);
+        if (px < -20 || px > W + 20 || pz < -20 || pz > H + 20) continue;
+        const big = s.kind === 'viking' || s.kind === 'silja';
+        const len = (big ? 11 : 7) * devicePixelRatio;
+        ctx.save();
+        ctx.translate(px, pz);
+        ctx.rotate(Math.atan2(Math.sin(s.yaw), Math.cos(s.yaw)) * -1 + Math.PI);
+        ctx.fillStyle = SHIP_COL[s.kind] || '#e8e6df';
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = devicePixelRatio;
+        ctx.beginPath();                              // a little ship: pointed bow, square transom
+        ctx.moveTo(0, -len);
+        ctx.lineTo(len * 0.34, -len * 0.2);
+        ctx.lineTo(len * 0.34, len * 0.7);
+        ctx.lineTo(-len * 0.34, len * 0.7);
+        ctx.lineTo(-len * 0.34, -len * 0.2);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // the boat
     const b = getBoat();
     const bx = sx(b.pos.x), bz = sz(b.pos.z);
@@ -270,6 +295,27 @@ export function createChart(mapData, { getBoat, onTeleport, realData = null, rou
       }
     }
 
+    // ships within the minimap window
+    if (getShips) {
+      for (const s of getShips()) {
+        if (Math.abs(s.x - b.pos.x) > R || Math.abs(s.z - b.pos.z) > R) continue;
+        const big = s.kind === 'viking' || s.kind === 'silja';
+        const len = (big ? 6 : 4.5) * dpr;
+        mtx.save();
+        mtx.translate(msx(s.x), msz(s.z));
+        mtx.rotate(Math.PI - s.yaw);
+        mtx.fillStyle = SHIP_COL[s.kind] || '#e8e6df';
+        mtx.strokeStyle = 'rgba(0,0,0,0.5)'; mtx.lineWidth = dpr;
+        mtx.beginPath();
+        mtx.moveTo(0, -len);
+        mtx.lineTo(len * 0.4, len * 0.6);
+        mtx.lineTo(-len * 0.4, len * 0.6);
+        mtx.closePath();
+        mtx.fill(); mtx.stroke();
+        mtx.restore();
+      }
+    }
+
     // the boat: same bearing math as the chart marker
     mtx.save();
     mtx.translate(W / 2, H / 2);
@@ -291,5 +337,8 @@ export function createChart(mapData, { getBoat, onTeleport, realData = null, rou
   }
   updateMini();
 
-  return { toggle, updateMini, get open() { return open; } };
+  // keep both views live: redraw the open chart, else the corner minimap
+  function tick() { if (open) draw(); else updateMini(); }
+
+  return { toggle, updateMini, tick, get open() { return open; } };
 }

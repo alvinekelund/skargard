@@ -66,6 +66,7 @@ const ships = createShips(scene);
 /* ── the chart (M): pan/zoom the whole real Archipelago Sea, click to sail there ── */
 const chart = createChart(mapData, {
   getBoat: () => boat.state,
+  getShips: () => ships.markers(),
   realData, routes: ROUTES,
   onTeleport: (x, z) => {
     boat.state.pos.set(x, 0, z);
@@ -267,7 +268,7 @@ function animate() {
     }
     hud.setLocation(best && bd < 900 ? (bd < 90 ? best.name : 'near ' + best.name) : 'open sea');
     if (archipelago.debugOn) hud.setDebug(archipelago.debugInfo);   // counts follow the streamed region
-    chart.updateMini();
+    chart.tick();   // live ships on the minimap, or the open chart
   }
   audio.setSpeed(boat.state.speed);
   composer.render();

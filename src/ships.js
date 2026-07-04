@@ -100,7 +100,7 @@ function connectionVessel() {
 export function createShips(scene) {
   const ships = [];
 
-  function addShip(mesh, route, speed, startFrac, dir, fixedYaw = false) {
+  function addShip(mesh, route, speed, startFrac, dir, fixedYaw = false, kind = '') {
     // arc-length table for steady motion along the polyline
     const seg = [];
     let total = 0;
@@ -110,13 +110,13 @@ export function createShips(scene) {
     }
     mesh.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
     scene.add(mesh);
-    ships.push({ mesh, route, seg, total, speed, s: startFrac * total, dir, yaw: 0, init: false, fixedYaw });
+    ships.push({ mesh, route, seg, total, speed, s: startFrac * total, dir, yaw: 0, init: false, fixedYaw, kind });
   }
 
-  addShip(cruiseFerry('viking'), ROUTES.viking, 9.0, 0.25, 1);
-  addShip(cruiseFerry('silja'), ROUTES.silja, 9.0, 0.7, -1);
-  addShip(roadFerry(), ROUTES.roadferry, 3.0, 0.4, 1, true);  // a lossi never turns around
-  addShip(connectionVessel(), ROUTES.utoline, 5.0, 0.55, 1);
+  addShip(cruiseFerry('viking'), ROUTES.viking, 9.0, 0.25, 1, false, 'viking');
+  addShip(cruiseFerry('silja'), ROUTES.silja, 9.0, 0.7, -1, false, 'silja');
+  addShip(roadFerry(), ROUTES.roadferry, 3.0, 0.4, 1, true, 'roadferry');  // a lossi never turns around
+  addShip(connectionVessel(), ROUTES.utoline, 5.0, 0.55, 1, false, 'utoline');
 
   function posAt(ship, s) {
     let acc = 0;
@@ -152,5 +152,10 @@ export function createShips(scene) {
     }
   }
 
-  return { update, ships };
+  // live positions for the chart / minimap
+  function markers() {
+    return ships.map((sh) => ({ x: sh.mesh.position.x, z: sh.mesh.position.z, yaw: sh.yaw, kind: sh.kind }));
+  }
+
+  return { update, ships, markers };
 }
