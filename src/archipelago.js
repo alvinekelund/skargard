@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeNoise2D, makeFbm, mulberry32 } from './noise.js';
 import { buildProps } from './props.js';
+import { createSatellite } from './satellite.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
    A Finnish skärgård: irregular, LOW, glacier-smoothed granite whaleback
@@ -366,6 +367,11 @@ export function buildArchipelago(scene, env, mapData, realData) {
   const shaders = [];
   const sunViewDir = new THREE.Vector3();
 
+  // real aerial imagery streamed per region and draped on the granite
+  const satellite = createSatellite();
+  let satOn = true;      // togglable (V) — falls back to stylised granite when off
+  let satBlend = 0;      // eased drape strength driven each frame
+
   // foliage: alpha-tested needle/leaf textures break the smooth silhouettes
   const needleTex = needleTexture(77); needleTex.repeat.set(3, 1);
   const leafTex = leafTexture(78); leafTex.repeat.set(2, 2);
@@ -390,6 +396,9 @@ export function buildArchipelago(scene, env, mapData, realData) {
     sh.uniforms.uRockD = { value: rockD };
     sh.uniforms.uRockN = { value: rockN };
     sh.uniforms.uRockR = { value: rockR };
+    sh.uniforms.uSat = { value: satellite.texture };
+    sh.uniforms.uSatBox = { value: satellite.box };   // live Vector4 (x0,z0,w,h)
+    sh.uniforms.uSatOn = { value: 0 };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n varying vec3 vWPos; varying vec3 vWNrm;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vWPos = worldPosition.xyz;')
@@ -397,6 +406,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uTime; uniform sampler2D uRockD, uRockN, uRockR;
+        uniform sampler2D uSat; uniform vec4 uSatBox; uniform float uSatOn;
         varying vec3 vWPos; varying vec3 vWNrm;
         vec3 triW() { vec3 w = pow(abs(vWNrm), vec3(4.0)); return w / (w.x + w.y + w.z); }
         vec4 triSample(sampler2D t, float s) {
@@ -406,7 +416,8 @@ export function buildArchipelago(scene, env, mapData, realData) {
                + texture2D(t, vWPos.xy * s) * w.z;
         }`)
       // albedo: two-scale rock detail (noise-masked so contrast survives) modulates
-      // the ecological vertex tint; mean-normalised so tints keep their value
+      // the ecological vertex tint; mean-normalised so tints keep their value.
+      // Then the REAL aerial photo of this exact spot is draped over the land.
       .replace('#include <color_fragment>', `#include <color_fragment>
         {
           vec3 texA = triSample(uRockD, 0.16).rgb;
@@ -415,6 +426,15 @@ export function buildArchipelago(scene, env, mapData, realData) {
           vec3 tex = mix(texA, texB, m * 0.6 + 0.2);
           vec3 detail = clamp(tex / vec3(0.22, 0.21, 0.20), 0.35, 1.9);
           diffuseColor.rgb *= mix(vec3(1.0), detail, 0.85);
+        }
+        if (uSatOn > 0.001) {
+          vec2 suv = (vWPos.xz - uSatBox.xy) / uSatBox.zw;
+          if (suv.x > 0.002 && suv.x < 0.998 && suv.y > 0.002 && suv.y < 0.998) {
+            vec3 sat = texture2D(uSat, suv).rgb;
+            sat *= 1.28;                                   // lift the aerial exposure to match the scene
+            float land = smoothstep(0.12, 0.7, vWPos.y);  // keep the wet granite at the very shore
+            diffuseColor.rgb = mix(diffuseColor.rgb, sat, land * uSatOn);
+          }
         }`)
       // triplanar normal perturbation (world-space whiteout blend → view space)
       .replace('#include <normal_fragment_maps>', `
@@ -776,6 +796,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
     treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
     landmark = null;
     activeCenter.set(cx0, cz0);
+    if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
     // islands whose bbox touches the build square, nearest first
     activeSet = [];
@@ -898,7 +919,13 @@ export function buildArchipelago(scene, env, mapData, realData) {
     _inv.copy(camera.matrixWorld).invert();
     sunViewDir.copy(sunDir).transformDirection(_inv);
     for (const sh of shaders) if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
-    for (const sh of islandShaders) if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
+    // ease the aerial drape in as tiles arrive; fall to granite when toggled off
+    const satTarget = (satOn && satellite.ready) ? 0.92 : 0;
+    satBlend += (satTarget - satBlend) * (1 - Math.exp(-3 * dt));
+    for (const sh of islandShaders) {
+      if (sh.uniforms.uTime) sh.uniforms.uTime.value = t;
+      if (sh.uniforms.uSatOn) sh.uniforms.uSatOn.value = satBlend;
+    }
     if (propsRef) propsRef.update(dt, t, env.waveHeightAt);
     // Utö light: four short flashes (Morse "H") then a pause, plus a slow sweeping beam
     if (landmark) {
@@ -915,10 +942,17 @@ export function buildArchipelago(scene, env, mapData, realData) {
     }
   }
 
+  function toggleSatellite() {
+    satOn = !satOn;
+    if (satOn) satellite.update(activeCenter.x, activeCenter.y);
+    return satOn;
+  }
+
   return {
-    group, update, islands, heightAt, rebuild, setDebug,
+    group, update, islands, heightAt, rebuild, setDebug, toggleSatellite,
     get debugOn() { return debugOn; },
     get debugInfo() { return lastCounts; },
+    get satOn() { return satOn; },
     get activeCenter() { return activeCenter; },
   };
 }

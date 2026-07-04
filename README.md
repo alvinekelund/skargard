@@ -53,6 +53,11 @@ Press `I` in game to see this live: teal shoreline rings have measured elevation
 orange ones are procedural; green/violet/yellow polygons are the mapped land cover.
 
 **Real data** (all free/open):
+- **Live aerial imagery** — the granite wears the *real satellite photo* of that
+  exact place, streamed as Web-Mercator tiles per region from Esri World Imagery
+  and draped on the terrain by world position (`src/satellite.js`). Press `V` to
+  toggle back to the stylised granite. This is the one thing that reaches the
+  network at runtime; imagery © Esri, Maxar, Earthstar Geographics.
 - **7,462 island outlines** with names — OSM coastline polygons (© OpenStreetMap
   contributors, ODbL), 1:1 scale.
 - **Island heights** — Copernicus **EU-DEM (~25 m)** via the AWS Open Data terrain

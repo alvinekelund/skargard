@@ -28,9 +28,18 @@ export function createHUD() {
       <div class="hud-loc">—</div>
     </div>
     <div class="hud-controls">
-      <b>←→</b> steer · <b>↑↓</b> <span class="ctl-trim">trim sail</span> · <b>E</b> engine · <b>C</b> camera · <b>M</b> chart · <b>T</b> time · <b>I</b> data
+      <b>←→</b> steer · <b>↑↓</b> <span class="ctl-trim">trim sail</span> · <b>E</b> engine · <b>C</b> camera · <b>M</b> chart · <b>T</b> time · <b>I</b> data · <b>V</b> imagery
     </div>`;
   document.body.appendChild(root);
+
+  // imagery attribution (required by the tile licence)
+  const attrib = document.createElement('div');
+  attrib.textContent = 'Aerial imagery © Esri, Maxar, Earthstar Geographics';
+  attrib.style.cssText = [
+    'position:fixed', 'right:8px', 'bottom:2px', 'z-index:20', 'pointer-events:none',
+    'font:9px ui-monospace,monospace', 'color:rgba(255,255,255,0.4)', 'text-shadow:0 1px 2px rgba(0,0,0,0.6)',
+  ].join(';');
+  document.body.appendChild(attrib);
 
   // ── mute button ──
   const muteBtn = document.createElement('button');

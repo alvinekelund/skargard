@@ -102,6 +102,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
   if (e.code === 'KeyM') chart.toggle();
   if (e.code === 'KeyI') hud.setDebug(archipelago.setDebug(!archipelago.debugOn));
+  if (e.code === 'KeyV') archipelago.toggleSatellite();
   if (e.code === 'KeyE') {
     boat.state.motorOn = !boat.state.motorOn;
     if (!boat.state.motorOn) boat.state.throttle = 0;
