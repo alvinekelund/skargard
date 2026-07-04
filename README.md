@@ -21,7 +21,8 @@ npm run dev      # → http://localhost:5183
 **Controls** — `←/→` steer · `↑/↓` trim the sail (throttle under power) · `E` engine ·
 `M` **chart** (pan/zoom the whole real Archipelago Sea, click open water to sail there) ·
 `C` camera (chase → **helm POV** → orbit) · `T` time of day ·
-`I` **data overlay** (shows which features come from real data vs procedural, with rendered-vs-total counts)
+`I` **data overlay** (shows which features come from real data vs procedural, with rendered-vs-total counts) ·
+🔊 button mutes the sound (a real sailing-boat recording, freesound community)
 
 ## How it feels
 
@@ -34,6 +35,13 @@ npm run dev      # → http://localhost:5183
 - **The sea is alive**: Gerstner waves with peaked crests, capillary sparkle in the
   sun path, and a wake that widens and brightens with speed *and* throws a skidding
   wash outboard when you turn hard. The HUD names where you are (real chart names).
+- **You are not alone out there**: a Viking Line and a Silja Line ferry work the
+  real Turku–Åland fairway across the north of the chart, a yellow road ferry
+  shuttles its short crossing, and the yellow Utö-line connection vessel passes
+  Nötö and Aspö on her way south — all on water-validated real routes (dashed on
+  the chart). The running rigging is simulated rope: sheets sag, sway with the
+  heel, and swap working/lazy sides when you tack. The companionway is open —
+  there's a lamp lit below.
 - **The chart is real**: every island is an actual OSM coastline polygon from the
   outer Archipelago Sea at true 1:1 scale (bbox 59.70–60.20°N, 21.15–22.35°E),
   baked to `public/archipelago_map.json`. Jurmo is the big treeless heath it

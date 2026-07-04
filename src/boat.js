@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createWake } from './wake.js';
 import { buildSwan36, sailUniforms } from './swan36.js';
 import { detailSwan36 } from './swan36-detail.js';
+import { createRopes } from './ropes.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
    A Nautor Swan 36 (S&S, 1967) + a heavy-displacement sailing model.
@@ -73,7 +74,11 @@ export function createBoat(scene) {
   }
 
   group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // interior + rope shadow flags were set deliberately — re-assert after the blanket pass
+  const cabinInt = swan.getObjectByName('cabinInterior');
+  if (cabinInt) cabinInt.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   scene.add(group);
+  const ropes = createRopes(swan, sailPivot);
   const wake = createWake(scene);
 
   // ── dynamic state ──
@@ -264,6 +269,10 @@ export function createBoat(scene) {
     // drive the sail flutter shader
     sailUniforms.uTime.value = t;
     sailUniforms.uFlap.value = Math.max(state.flap, 0.08 * (ctx.gust || 0));
+
+    // live rigging: hangs toward the true horizon, swaps sides with the tack
+    group.updateMatrixWorld();
+    ropes.update(dt, { gust: ctx.gust || 0, flap: state.flap, side: state.side, t });
 
     wake.update(state, fwd, t, wAt);
 

@@ -20,6 +20,7 @@ import { createHUD } from './hud.js';
 import { createAudio } from './audio.js';
 import { createChart } from './map.js';
 import { createGustField } from './wind.js';
+import { createShips, ROUTES } from './ships.js';
 
 /* ── renderer / scene / camera ── */
 const container = document.getElementById('app');
@@ -58,9 +59,14 @@ const boat = createBoat(scene);
   archipelago.rebuild(boat.state.pos.x, boat.state.pos.z);
 }
 
+// ship traffic on its real routes: Viking + Silja on the Turku–Åland fairway,
+// the yellow road ferry, and the Utö-line connection vessel
+const ships = createShips(scene);
+
 /* ── the chart (M): pan/zoom the whole real Archipelago Sea, click to sail there ── */
 const chart = createChart(mapData, {
   getBoat: () => boat.state,
+  realData, routes: ROUTES,
   onTeleport: (x, z) => {
     boat.state.pos.set(x, 0, z);
     boat.state.speed = Math.min(boat.state.speed, 1);
@@ -196,9 +202,10 @@ addEventListener('resize', () => {
 
 /* ── HUD ── */
 const hud = createHUD();
+hud.onMuteToggle = (m) => audio.setMuted(m);
 
 // dev hook for inspection
-window.__game = { boat, env, wind, input, camera, THREE, archipelago, chart, bloom, grade, renderer, composer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
+window.__game = { boat, env, wind, input, camera, THREE, archipelago, chart, ships, bloom, grade, renderer, composer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
 
 /* ── loop ── */
 const clock = new THREE.Clock();
@@ -224,6 +231,7 @@ function animate() {
     boat.state.event = null;
   }
   archipelago.update(dt, perfT, camera, env.sunDir);
+  ships.update(dt, perfT, env.waveHeightAt);
   // stream the next region in as the boat sails on (brief hitch, ~every 1.2 km)
   {
     const c = archipelago.activeCenter;

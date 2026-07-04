@@ -32,6 +32,25 @@ export function createHUD() {
     </div>`;
   document.body.appendChild(root);
 
+  // ── mute button ──
+  const muteBtn = document.createElement('button');
+  muteBtn.textContent = '🔊';
+  muteBtn.title = 'mute sound';
+  muteBtn.style.cssText = [
+    'position:fixed', 'left:16px', 'bottom:16px', 'width:38px', 'height:38px',
+    'border-radius:50%', 'border:1px solid rgba(255,255,255,0.22)',
+    'background:rgba(10,16,24,0.45)', 'color:#fff', 'font-size:16px',
+    'cursor:pointer', 'z-index:25', 'backdrop-filter:blur(2px)',
+  ].join(';');
+  const api = {};
+  muteBtn.addEventListener('click', () => {
+    const m = muteBtn.textContent === '🔊';
+    muteBtn.textContent = m ? '🔇' : '🔊';
+    muteBtn.title = m ? 'unmute sound' : 'mute sound';
+    if (api.onMuteToggle) api.onMuteToggle(m);
+  });
+  document.body.appendChild(muteBtn);
+
   // ── data-provenance panel (D): what in view is real data vs procedural ──
   const dataPanel = document.createElement('div');
   dataPanel.style.cssText = [
@@ -160,5 +179,6 @@ export function createHUD() {
     }
   }
 
-  return { root, update, setLocation, setDebug };
+  api.root = root; api.update = update; api.setLocation = setLocation; api.setDebug = setDebug;
+  return api;
 }

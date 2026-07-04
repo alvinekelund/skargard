@@ -223,11 +223,18 @@ export function buildSwan36({ withSails = true } = {}) {
   // soft edges from the extrude bevel. Sits x −1.25 … +2.35.
   const cs = new THREE.Shape();                    // shape (x, y) → world (x, −z)
   const xa = -1.25, xf = 2.35, wa = 0.95, wf = 0.55, r = 0.55;
+  const CWAY = { w: 0.30, d: 0.55 };               // companionway notch: half-width, depth fwd
   cs.moveTo(xa, -wa);
   cs.lineTo(xf - r, -wf);
   cs.quadraticCurveTo(xf, -wf, xf, 0);
   cs.quadraticCurveTo(xf, wf, xf - r, wf);
   cs.lineTo(xa, wa);
+  // the companionway: a full-height notch in the aft face — with the sliding
+  // hatch run back this IS what an open Swan companionway looks like
+  cs.lineTo(xa, CWAY.w);
+  cs.lineTo(xa + CWAY.d, CWAY.w);
+  cs.lineTo(xa + CWAY.d, -CWAY.w);
+  cs.lineTo(xa, -CWAY.w);
   cs.lineTo(xa, -wa);
   const cabinGeo = new THREE.ExtrudeGeometry(cs, {
     depth: 0.30, bevelEnabled: true, bevelThickness: 0.10, bevelSize: 0.08, bevelSegments: 3,

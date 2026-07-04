@@ -4,7 +4,7 @@
    there. Toggled with M.
    ─────────────────────────────────────────────────────────────────────────── */
 
-export function createChart(mapData, { getBoat, onTeleport }) {
+export function createChart(mapData, { getBoat, onTeleport, realData = null, routes = null }) {
   const islands = mapData.islands.map((rec) => {
     const pts = rec.p;
     let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
@@ -74,6 +74,49 @@ export function createChart(mapData, { getBoat, onTeleport }) {
       ctx.closePath(); ctx.fill();
     }
 
+    // ferry lanes: the real routes the traffic sails, as faint dashed tracks
+    if (routes) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = devicePixelRatio;
+      ctx.setLineDash([6 * devicePixelRatio, 7 * devicePixelRatio]);
+      for (const key of ['viking', 'roadferry', 'utoline']) {   // silja ≈ viking at chart scale
+        const r = routes[key];
+        if (!r) continue;
+        ctx.beginPath();
+        ctx.moveTo(sx(r[0][0]), sz(r[0][1]));
+        for (let i = 1; i < r.length; i++) ctx.lineTo(sx(r[i][0]), sz(r[i][1]));
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+
+    // zoomed in, the chart grows granular: charted seamarks, piers, buildings
+    if (realData && k > 0.018) {
+      const inView = (x, z) => { const px = sx(x), pz = sz(z); return px > -20 && px < W + 20 && pz > -20 && pz < H + 20; };
+      if (k > 0.045) {
+        ctx.fillStyle = '#5c4432';                                 // piers
+        for (const line of realData.piers) {
+          for (const [px, pz] of line) if (inView(px, pz)) ctx.fillRect(sx(px) - 1, sz(pz) - 1, 2.5 * devicePixelRatio, 2.5 * devicePixelRatio);
+        }
+        ctx.fillStyle = '#7e3b2d';                                 // buildings → villages emerge
+        for (const [bx2, bz2] of realData.buildings) {
+          if (inView(bx2, bz2)) ctx.fillRect(sx(bx2) - 1, sz(bz2) - 1, 2 * devicePixelRatio, 2 * devicePixelRatio);
+        }
+      }
+      const MARK = { 0: '#e05a3a', 1: '#3fae5a', 6: '#e8e6df', 7: '#ffcf66' };
+      for (const [mx2, mz2, tt] of realData.seamarks) {            // the fairway system
+        if (!inView(mx2, mz2)) continue;
+        const px = sx(mx2), pz = sz(mz2), r2 = 2.2 * devicePixelRatio;
+        if (tt >= 2 && tt <= 5) {                                  // cardinals: yellow/black
+          ctx.fillStyle = '#1c1c1c'; ctx.fillRect(px - r2 / 2 - 1, pz - r2 / 2 - 1, r2 + 2, r2 + 2);
+          ctx.fillStyle = '#e8c520'; ctx.fillRect(px - r2 / 2, pz - r2 / 2, r2, r2);
+        } else {
+          ctx.fillStyle = MARK[tt] || '#e8e6df';
+          ctx.beginPath(); ctx.arc(px, pz, r2 * 0.7, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+
     // names appear as you zoom in (bigger islands first)
     ctx.font = `${11 * devicePixelRatio}px Georgia, serif`;
     ctx.textAlign = 'center';
@@ -82,7 +125,7 @@ export function createChart(mapData, { getBoat, onTeleport }) {
     for (const isl of islands) {
       if (!isl.n) continue;
       const px = (isl.maxX - isl.minX) * k;
-      if (px < 46) continue;
+      if (px < 30) continue;
       const cxp = sx((isl.minX + isl.maxX) / 2), czp = sz((isl.minZ + isl.maxZ) / 2);
       if (cxp < -100 || cxp > W + 100 || czp < -50 || czp > H + 50) continue;
       ctx.fillText(isl.n, cxp, czp);
@@ -217,6 +260,16 @@ export function createChart(mapData, { getBoat, onTeleport }) {
       for (let i = 1; i < isl.p.length; i++) mtx.lineTo(msx(isl.p[i][0]), msz(isl.p[i][1]));
       mtx.closePath(); mtx.fill();
     }
+    // charted seamarks — the minimap doubles as a pilotage chart
+    if (realData) {
+      const MMARK = { 0: '#e05a3a', 1: '#3fae5a', 6: '#e8e6df', 7: '#ffcf66' };
+      for (const [mx2, mz2, tt] of realData.seamarks) {
+        if (Math.abs(mx2 - b.pos.x) > R || Math.abs(mz2 - b.pos.z) > R) continue;
+        mtx.fillStyle = tt >= 2 && tt <= 5 ? '#e8c520' : (MMARK[tt] || '#e8e6df');
+        mtx.fillRect(msx(mx2) - dpr, msz(mz2) - dpr, 2 * dpr, 2 * dpr);
+      }
+    }
+
     // the boat: same bearing math as the chart marker
     mtx.save();
     mtx.translate(W / 2, H / 2);

@@ -283,13 +283,17 @@ export function detailSwan36(swan, renderer = null) {
     boxGeo(2.2, 0.03, 0.05, -0.5, 0.82,  1.18, 0.021),
     boxGeo(2.2, 0.03, 0.05, -0.5, 0.82, -1.18, 0.021),
   ]), SS);
+  // (the genoa sheets + mainsheet fall are LIVE verlet ropes now — see ropes.js;
+  //  only the tensioned halyards and the turns on the winch drum stay static)
   const ropes = new THREE.Mesh(mergeGeometries([
     barGeo(V(1.53, 14.40, 0.025), V(1.53, 1.05, 0.030), 0.006),   // main halyard
     barGeo(V(1.68, 14.40, -0.025), V(1.68, 1.05, -0.030), 0.006), // genoa halyard
-    barGeo(V(0.55, 1.52, 0.02), V(-0.88, 0.93, 1.17), 0.008),     // genoa sheet
-    barGeo(V(-0.88, 0.93, 1.19), V(-2.03, 1.12, 0.66), 0.008),
     new THREE.TorusGeometry(0.062, 0.008, 6, 20).rotateX(Math.PI / 2).translate(-2.05, 1.085, 0.64),
     new THREE.TorusGeometry(0.062, 0.008, 6, 20).rotateX(Math.PI / 2).translate(-2.05, 1.102, 0.64),
+    // coiled halyard tails hung at the mast base
+    new THREE.TorusGeometry(0.09, 0.010, 6, 18).rotateZ(Math.PI / 2 - 0.2).translate(1.52, 1.28, 0.14),
+    new THREE.TorusGeometry(0.085, 0.010, 6, 18).rotateZ(Math.PI / 2 - 0.35).translate(1.53, 1.26, 0.15),
+    new THREE.TorusGeometry(0.09, 0.010, 6, 18).rotateZ(Math.PI / 2 + 0.15).translate(1.60, 1.27, -0.16),
   ]), ROPE);
   noShadow.push(ropes);
 
@@ -340,15 +344,84 @@ export function detailSwan36(swan, renderer = null) {
   const vang = new THREE.Mesh(barGeo(V(0.02, 1.00, 0), V(-1.15, 2.00, 0), 0.012), SS);
   const toppingLift = new THREE.Mesh(barGeo(V(0.00, 14.48, 0), V(-3.46, 2.12, 0), 0.004), WIRE);
   toppingLift.castShadow = false;
-  const mainsheet = new THREE.Mesh(mergeGeometries([                // 3-part tackle
-    barGeo(V(-3.49, 2.02, 0.015), V(-3.46, 1.10, 0.02), 0.0065),
-    barGeo(V(-3.46, 1.10, 0.000), V(-3.48, 2.02, -0.005), 0.0065),
-    barGeo(V(-3.48, 2.02, -0.02), V(-3.44, 1.10, -0.02), 0.0065),
-  ]), ROPE);
-  mainsheet.castShadow = false;
   vang.castShadow = true;
-  BG.add(vang, toppingLift, mainsheet);
+  BG.add(vang, toppingLift);          // the mainsheet fall is a live rope (ropes.js)
   swan.add(BG);
+
+  // 15. the cabin: an open companionway you can actually see into. The trunk
+  //     has a full-height notch cut in its aft face (swan36.js); this dresses
+  //     it — teak frame, washboard sill, run-back hatch — and furnishes the
+  //     saloon behind it: sole, settees, table, shelf, and a warm lamp.
+  const cabin = new THREE.Group(); cabin.name = 'cabinInterior';
+  const IVORY = new THREE.MeshStandardMaterial({
+    color: 0xe8e2d2, roughness: 0.9, envMapIntensity: 0.15,
+    emissive: 0x2a1d10, emissiveIntensity: 0.55,   // lamplight bounce — never pitch black below
+  });
+  const teakIn = new THREE.MeshStandardMaterial({ map: teak, roughness: 0.85, envMapIntensity: 0.1 });
+  const CUSH = new THREE.MeshStandardMaterial({ color: 0x8a4b2e, roughness: 0.95 });   // burnt sienna
+  const DARK = new THREE.MeshStandardMaterial({ color: 0x241c14, roughness: 1.0 });
+
+  // the room, built inward-facing (x −1.26 … +1.30, floor 0.90, ceiling 1.29)
+  const room = [
+    boxGeo(2.56, 0.02, 1.06, 0.02, 0.90, 0),          // sole
+    boxGeo(2.56, 0.02, 1.06, 0.02, 1.30, 0),          // deckhead
+    boxGeo(2.56, 0.40, 0.02, 0.02, 1.10,  0.53),      // sides
+    boxGeo(2.56, 0.40, 0.02, 0.02, 1.10, -0.53),
+    boxGeo(0.02, 0.40, 1.06, 1.30, 1.10, 0),          // fwd bulkhead
+  ];
+  const shell = new THREE.Mesh(mergeGeometries(room), IVORY);
+  shell.receiveShadow = true;
+  // doorway to the fore cabin, dark
+  const doorway = new THREE.Mesh(boxGeo(0.015, 0.30, 0.34, 1.292, 1.08, 0.05), DARK);
+  // furnishings: settee cushions + backrests, table on a pedestal, shelf + books
+  const furniture = new THREE.Mesh(mergeGeometries([
+    boxGeo(1.7, 0.075, 0.30, 0.0, 0.955,  0.36),      // settees
+    boxGeo(1.7, 0.075, 0.30, 0.0, 0.955, -0.36),
+    boxGeo(1.7, 0.20, 0.05, 0.0, 1.08,  0.505),       // backrests
+    boxGeo(1.7, 0.20, 0.05, 0.0, 1.08, -0.505),
+  ]), CUSH);
+  const woodwork = new THREE.Mesh(mergeGeometries([
+    boxGeo(0.52, 0.022, 0.34, 0.05, 1.075, 0),        // saloon table
+    new THREE.CylinderGeometry(0.03, 0.04, 0.16, 8).translate(0.05, 0.99, 0),
+    boxGeo(1.2, 0.02, 0.10, 0.2, 1.21, 0.47),         // shelf on the side wall
+    boxGeo(0.05, 0.085, 0.06, -0.10, 1.26,  0.47),    // books
+    boxGeo(0.04, 0.075, 0.06, -0.03, 1.255, 0.47),
+    boxGeo(0.05, 0.09, 0.06,  0.05, 1.263, 0.47),
+    boxGeo(0.35, 0.004, 0.25, 0.02, 1.088, 0.02),     // chart on the table
+  ]), teakIn);
+  // companionway dressing: teak frame, washboard sill, hatch run back on the roof
+  const frame = new THREE.Mesh(mergeGeometries([
+    boxGeo(0.045, 0.42, 0.035, -1.245, 1.10,  0.315),
+    boxGeo(0.045, 0.42, 0.035, -1.245, 1.10, -0.315),
+    boxGeo(0.045, 0.035, 0.66, -1.245, 1.315, 0),
+    boxGeo(0.03, 0.13, 0.60, -1.24, 0.955, 0),        // washboard you step over
+  ]), VARN);
+  const hatch = new THREE.Mesh(boxGeo(0.62, 0.025, 0.64, -0.62, 1.345, 0),
+    swan.getObjectByName('cabinTrunk').material);
+  hatch.castShadow = true;
+  // the lamp: a warm point of life below deck
+  const lampGlow = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffd9a0, emissive: 0xffb45e, emissiveIntensity: 2.2 }));
+  lampGlow.position.set(1.24, 1.17, 0.30);
+  const lampLight = new THREE.PointLight(0xffb45e, 1.6, 2.8, 1.6);
+  lampLight.position.set(1.1, 1.15, 0.2);
+  cabin.add(shell, doorway, furniture, woodwork, frame, hatch, lampGlow, lampLight);
+  cabin.traverse((o) => { if (o.isMesh && o !== hatch) o.castShadow = false; });
+  swan.add(cabin);
+
+  // 16. dorade vents on the trunk roof — the classic pair
+  const dorade = [];
+  for (const s of [1, -1]) {
+    dorade.push(
+      boxGeo(0.22, 0.07, 0.14, 1.05, 1.355, 0.30 * s),
+      new THREE.CylinderGeometry(0.045, 0.045, 0.10, 10).translate(0.98, 1.44, 0.30 * s),
+      new THREE.SphereGeometry(0.058, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2)
+        .rotateX(-Math.PI / 2).translate(0.98, 1.49, 0.30 * s),
+    );
+  }
+  const dorades = new THREE.Mesh(mergeGeometries(dorade), gel(0.4));
+  dorades.castShadow = true;
+  swan.add(dorades);
 
   return swan;
 }
