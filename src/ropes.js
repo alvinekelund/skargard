@@ -11,8 +11,8 @@ const G = 6.5;                       // visual gravity — full 9.8 jitters at 6
 const SUBSTEP = 1 / 60;
 
 class Rope {
-  constructor(parent, mat, { n = 11, radius = 0.0075, slack = 1.1, floorY = null }) {
-    this.n = n; this.radius = radius; this.slack = slack; this.floorY = floorY;
+  constructor(parent, mat, { n = 11, radius = 0.0075, slack = 1.1, collide = null }) {
+    this.n = n; this.radius = radius; this.slack = slack; this.collide = collide;
     this.pts = []; this.prev = [];
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
     this.mesh.castShadow = false; this.mesh.frustumCulled = false;
@@ -42,7 +42,8 @@ class Rope {
       p.y += vy + gLocal.y * SUBSTEP * SUBSTEP * 60;
       p.z += vz + (gLocal.z + jitter * Math.cos(t * 5.1 + i * 2.3) * 0.5) * SUBSTEP * SUBSTEP * 60;
     }
-    // pin ends, relax distance constraints
+    // pin ends, relax distance constraints, then push free points out of the boat
+    // (collision) — interleaved so the rope settles ON the deck, not through it
     this.pts[0].copy(a); this.pts[n - 1].copy(b);
     for (let it = 0; it < 4; it++) {
       for (let i = 0; i < n - 1; i++) {
@@ -55,9 +56,7 @@ class Rope {
         p.x += dx * diff * (2 * fa / w); p.y += dy * diff * (2 * fa / w); p.z += dz * diff * (2 * fa / w);
         q.x -= dx * diff * (2 * fb / w); q.y -= dy * diff * (2 * fb / w); q.z -= dz * diff * (2 * fb / w);
       }
-    }
-    if (this.floorY !== null) {
-      for (let i = 1; i < n - 1; i++) if (this.pts[i].y < this.floorY) this.pts[i].y = this.floorY;
+      if (this.collide) for (let i = 1; i < n - 1; i++) this.collide(this.pts[i]);
     }
   }
 
@@ -84,11 +83,25 @@ export function createRopes(swan, sailPivot) {
   const TRAV = new THREE.Vector3(-1.85, 1.07, 0);
   const BOOM_END = new THREE.Vector3(-3.47, 2.02, 0);   // sailPivot-local
 
-  const main = new Rope(swan, mat, { n: 9, radius: 0.008, slack: 1.05 });
-  const sheetS1 = new Rope(swan, matRed, { n: 10, radius: 0.0075, slack: 1.02, floorY: 0.88 });
-  const sheetS2 = new Rope(swan, matRed, { n: 8, radius: 0.0075, slack: 1.02, floorY: 0.9 });
-  const sheetP1 = new Rope(swan, matRed, { n: 12, radius: 0.0075, slack: 1.3, floorY: 0.88 });
-  const sheetP2 = new Rope(swan, matRed, { n: 9, radius: 0.0075, slack: 1.22, floorY: 0.9 });
+  // keep a rope point out of the boat: rest it on the deck (the cockpit sole sits
+  // lower), and push it up onto the coachroof or outboard of the cabin trunk
+  // rather than letting it sink through the hull.
+  function collide(p) {
+    let floor = 0.9;                                                  // side/foredeck
+    if (p.x > -3.4 && p.x < -1.5 && Math.abs(p.z) < 0.62) floor = 0.52; // cockpit sole
+    if (p.y < floor) p.y = floor;
+    // cabin trunk: x −1.25…2.35, half-width ~0.9, roof ~1.4 — evict from inside
+    if (p.x > -1.25 && p.x < 2.35 && Math.abs(p.z) < 0.9 && p.y < 1.4) {
+      if (1.4 - p.y <= 0.92 - Math.abs(p.z)) p.y = 1.4;              // up onto the roof
+      else p.z = (p.z >= 0 ? 1 : -1) * 0.92;                        // out to the side deck
+    }
+  }
+
+  const main = new Rope(swan, mat, { n: 9, radius: 0.008, slack: 1.05, collide });
+  const sheetS1 = new Rope(swan, matRed, { n: 10, radius: 0.0075, slack: 1.02, collide });
+  const sheetS2 = new Rope(swan, matRed, { n: 8, radius: 0.0075, slack: 1.02, collide });
+  const sheetP1 = new Rope(swan, matRed, { n: 12, radius: 0.0075, slack: 1.3, collide });
+  const sheetP2 = new Rope(swan, matRed, { n: 9, radius: 0.0075, slack: 1.22, collide });
 
   const _q = new THREE.Quaternion();
   const _g = new THREE.Vector3();

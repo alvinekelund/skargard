@@ -25,6 +25,8 @@ const M = {
   gull: new THREE.MeshBasicMaterial({ color: 0x1a1518, side: THREE.DoubleSide }),
   cardBlack: new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.5 }),
   cardYellow: new THREE.MeshStandardMaterial({ color: 0xe8c520, roughness: 0.5 }),
+  glass: new THREE.MeshStandardMaterial({ color: 0x33404a, roughness: 0.2, metalness: 0.4 }),
+  navy: new THREE.MeshStandardMaterial({ color: 0x24466e, roughness: 0.55 }),
 };
 // shared across region rebuilds — the streaming dispose pass must skip these
 Object.values(M).forEach((m) => { m.__shared = true; });
@@ -47,6 +49,26 @@ function rowboat(rng) {
   hull.scale.set(1, 0.42, 1);
   hull.rotation.x = Math.PI / 2; hull.rotation.z = Math.PI / 2;
   hull.position.y = 0.16; g.add(hull);
+  return g;
+}
+
+// a small open motorboat (~5 m) — flattened hull, console + windscreen, outboard.
+// bow at +Z so heading = rotation.y matches the movement convention.
+function motorboat(rng) {
+  const g = new THREE.Group();
+  const hullMat = [M.hullWhite, M.falunRed, M.white, M.navy][Math.floor(rng() * 4)];
+  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.72, 3.4, 4, 9), hullMat);
+  hull.scale.set(1, 0.62, 0.5);          // (width, length, draft) after the tip below
+  hull.rotation.x = Math.PI / 2;         // long axis → +Z
+  hull.position.y = 0.32; g.add(hull);
+  const well = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.34, 2.0), M.woodDark);
+  well.position.set(0, 0.5, -0.3); g.add(well);                    // dark cockpit
+  const cons = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.5, 0.65), M.white);
+  cons.position.set(0, 0.72, 0.2); g.add(cons);                    // console
+  const ws = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 0.04), M.glass);
+  ws.position.set(0, 1.0, -0.02); ws.rotation.x = 0.35; g.add(ws); // raked windscreen
+  const ob = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.72, 0.34), M.steel);
+  ob.position.set(0, 0.32, -1.9); g.add(ob);                       // outboard at the transom
   return g;
 }
 
@@ -101,7 +123,7 @@ function gull() {
 export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
-  const dyn = { buoys: [], traffic: [], gulls: [] };
+  const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [] };
 
   const big = activeSet.filter((i) => i.A > 40000);
 
@@ -241,6 +263,37 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     dyn.gulls.push(bird);
   }
 
+  // ── small boats moored off the real piers (harbours) ──
+  let moored = 0;
+  for (const line of (region.piers || [])) {
+    if (moored >= 7) break;
+    let best = null, bd = 0;                       // seaward pier end = deepest water
+    for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
+    if (!best || bd < 0.7) continue;
+    const [px, pz] = best;
+    let dx = px - line[0][0], dz = pz - line[0][1];
+    const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
+    const b = rng() < 0.55 ? motorboat(rng) : rowboat(rng);
+    b.position.set(px + dx * 3.5, 0, pz + dz * 3.5);
+    b.rotation.y = Math.atan2(dx, dz) + (rng() - 0.5) * 0.4;
+    group.add(b);
+    dyn.moored.push(b);
+    moored++;
+  }
+
+  // ── a few small boats puttering around the region's open water ──
+  for (let n = 0; n < 3; n++) {
+    const ang = rng() * Math.PI * 2, dist = 250 + rng() * 650;
+    const x = center.x + Math.sin(ang) * dist, z = center.y + Math.cos(ang) * dist;
+    if (heightAt(x, z) > -2) continue;
+    const b = motorboat(rng);
+    b.position.set(x, 0, z);
+    b.userData = { heading: rng() * Math.PI * 2, speed: 2.4 + rng() * 3.2, turn: 0, side: rng() < 0.5 ? 1 : -1, phase: rng() * 6.28 };
+    b.rotation.y = b.userData.heading;
+    group.add(b);
+    dyn.smallCraft.push(b);
+  }
+
   group.traverse((o) => { if (o.isMesh && o.material !== M.gull && o.material !== M.sail) { o.castShadow = true; o.receiveShadow = true; } });
 
   function update(dt, t, waveHeightAt) {
@@ -262,6 +315,21 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       bird.rotation.y = -a - Math.PI / 2 * Math.sign(u.w);
       const f = Math.sin(t * u.flap + u.phase) * 0.55;
       u.L.rotation.y = f; u.R.rotation.y = -f;
+    }
+    for (const b of dyn.moored) {                    // ride the swell at anchor
+      b.position.y = (waveHeightAt ? waveHeightAt(b.position.x, b.position.z, t) : 0) * 0.9;
+      b.rotation.z = Math.sin(t * 0.7 + b.position.x) * 0.05;
+    }
+    for (const b of dyn.smallCraft) {                // putter about, turning off the land
+      const u = b.userData;
+      const ax = b.position.x + Math.sin(u.heading) * 45, az = b.position.z + Math.cos(u.heading) * 45;
+      if (heightAt(ax, az) > -1.5) u.turn = Math.min(u.turn + dt, 0.6); else u.turn *= 0.9;
+      u.heading += u.turn * u.side * dt;
+      b.position.x += Math.sin(u.heading) * u.speed * dt;
+      b.position.z += Math.cos(u.heading) * u.speed * dt;
+      b.position.y = (waveHeightAt ? waveHeightAt(b.position.x, b.position.z, t) : 0) * 0.85;
+      b.rotation.y = u.heading;
+      b.rotation.z = Math.sin(t * 1.3 + u.phase) * 0.05 - u.turn * u.side * 0.15;
     }
   }
 
