@@ -198,7 +198,7 @@ addEventListener('resize', () => {
 const hud = createHUD();
 
 // dev hook for inspection
-window.__game = { boat, env, wind, input, camera, THREE, archipelago, chart, bloom, grade, renderer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
+window.__game = { boat, env, wind, input, camera, THREE, archipelago, chart, bloom, grade, renderer, composer, setCamMode: (m) => { camMode = m; orbit.enabled = (m === 'orbit'); } };
 
 /* ── loop ── */
 const clock = new THREE.Clock();
@@ -259,6 +259,7 @@ function animate() {
     }
     hud.setLocation(best && bd < 900 ? (bd < 90 ? best.name : 'near ' + best.name) : 'open sea');
     if (archipelago.debugOn) hud.setDebug(archipelago.debugInfo);   // counts follow the streamed region
+    chart.updateMini();
   }
   audio.setSpeed(boat.state.speed);
   composer.render();

@@ -181,5 +181,62 @@ export function createChart(mapData, { getBoat, onTeleport }) {
     }
   }
 
-  return { toggle, get open() { return open; } };
+  // ── always-on corner minimap: north-up, boat-centred, click to open the chart ──
+  const MINI = 188;                                 // css px
+  const dpr = devicePixelRatio;
+  const mini = document.createElement('canvas');
+  mini.width = MINI * dpr; mini.height = MINI * dpr;
+  mini.style.cssText = `position:fixed;top:16px;right:16px;width:${MINI}px;height:${MINI}px;
+    border-radius:10px;border:1px solid rgba(255,255,255,0.16);z-index:20;cursor:pointer;
+    box-shadow:0 2px 14px rgba(0,0,0,0.35);`;
+  mini.title = 'open the chart (M)';
+  mini.addEventListener('click', () => toggle(true));
+  document.body.appendChild(mini);
+  const mtx = mini.getContext('2d');
+  const MPPM = (MINI * dpr) / 4200;                 // ~4.2 km across
+
+  function updateMini() {
+    if (open) return;                               // the full chart supersedes it
+    const b = getBoat();
+    const W = mini.width, H = mini.height;
+    const msx = (x) => (x - b.pos.x) * MPPM + W / 2;
+    const msz = (z) => (z - b.pos.z) * MPPM + H / 2;
+    mtx.fillStyle = '#16323e';
+    mtx.fillRect(0, 0, W, H);
+    mtx.fillStyle = '#7c8464';
+    const R = 2400;                                 // world metres shown (with margin)
+    for (const isl of islands) {
+      if (isl.maxX < b.pos.x - R || isl.minX > b.pos.x + R ||
+          isl.maxZ < b.pos.z - R || isl.minZ > b.pos.z + R) continue;
+      if ((isl.maxX - isl.minX) * MPPM < 1.5 && (isl.maxZ - isl.minZ) * MPPM < 1.5) {
+        mtx.fillRect(msx(isl.minX), msz(isl.minZ), 1.4, 1.4);
+        continue;
+      }
+      mtx.beginPath();
+      mtx.moveTo(msx(isl.p[0][0]), msz(isl.p[0][1]));
+      for (let i = 1; i < isl.p.length; i++) mtx.lineTo(msx(isl.p[i][0]), msz(isl.p[i][1]));
+      mtx.closePath(); mtx.fill();
+    }
+    // the boat: same bearing math as the chart marker
+    mtx.save();
+    mtx.translate(W / 2, H / 2);
+    mtx.rotate(Math.PI - b.heading);
+    mtx.fillStyle = '#ffb35c';
+    mtx.strokeStyle = 'rgba(0,0,0,0.5)'; mtx.lineWidth = dpr;
+    const s = 6 * dpr;
+    mtx.beginPath();
+    mtx.moveTo(0, -s); mtx.lineTo(s * 0.62, s); mtx.lineTo(-s * 0.62, s); mtx.closePath();
+    mtx.fill(); mtx.stroke();
+    mtx.restore();
+    // N arrow + scale
+    mtx.fillStyle = 'rgba(255,255,255,0.7)';
+    mtx.font = `${9 * dpr}px ui-monospace, Menlo, monospace`;
+    mtx.textAlign = 'left';
+    mtx.fillText('N', 8 * dpr, 14 * dpr);
+    mtx.fillRect(8 * dpr, H - 10 * dpr, 1000 * MPPM, 2 * dpr);
+    mtx.fillText('1 km', 8 * dpr, H - 15 * dpr);
+  }
+  updateMini();
+
+  return { toggle, updateMini, get open() { return open; } };
 }

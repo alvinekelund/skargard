@@ -35,7 +35,7 @@ export function createHUD() {
   // ── data-provenance panel (D): what in view is real data vs procedural ──
   const dataPanel = document.createElement('div');
   dataPanel.style.cssText = [
-    'position:fixed', 'top:16px', 'right:16px', 'max-width:340px', 'padding:12px 14px',
+    'position:fixed', 'top:216px', 'right:16px', 'max-width:340px', 'padding:12px 14px',   // below the minimap
     'background:rgba(8,14,20,0.82)', 'border:1px solid rgba(255,255,255,0.14)', 'border-radius:6px',
     'font:11px/1.65 ui-monospace,monospace', 'color:rgba(255,255,255,0.85)', 'display:none',
     'z-index:30', 'pointer-events:none', 'white-space:pre-wrap',
@@ -114,11 +114,14 @@ export function createHUD() {
   }
 
   function update(state, wind) {
-    // heading-up dial
+    // heading-up dial. Game convention: heading 0 = +Z = south, so bearing =
+    // 180 − headingDeg. The dial must rotate by −bearing, and the wind marker
+    // sits at the wind's FROM-bearing relative to the bow — both were mirrored
+    // before, which made the wind seem to swing the wrong way through a turn.
     const headingDeg = (state.heading * 180 / Math.PI);
-    dial.setAttribute('transform', `rotate(${-headingDeg} ${cx} ${cy})`);
+    dial.setAttribute('transform', `rotate(${headingDeg - 180} ${cx} ${cy})`);
     const windToDeg = Math.atan2(wind.dir.x, wind.dir.z) * 180 / Math.PI;
-    windG.setAttribute('transform', `rotate(${windToDeg - headingDeg} ${cx} ${cy})`);
+    windG.setAttribute('transform', `rotate(${headingDeg - windToDeg - 180} ${cx} ${cy})`);
 
     speedNum.textContent = (state.speed * 1.94384).toFixed(1);
 
