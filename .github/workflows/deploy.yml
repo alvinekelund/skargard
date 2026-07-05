@@ -44,13 +44,13 @@ jobs:
         continue-on-error: true
       - id: retry1
         if: steps.deployment.outcome == 'failure'
-        run: sleep 30
+        run: sleep 120
       - id: deployment2
         if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
         continue-on-error: true
       - if: steps.deployment.outcome == 'failure' && steps.deployment2.outcome == 'failure'
-        run: sleep 60
+        run: sleep 240
       - id: deployment3
         if: steps.deployment.outcome == 'failure' && steps.deployment2.outcome == 'failure'
         uses: actions/deploy-pages@v4
