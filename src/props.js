@@ -74,6 +74,22 @@ function motorboat(rng) {
   return g;
 }
 
+// a small figure (~1.75 m): trousers, bright jacket, head — reads at dock distance
+function person(rng) {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshStandardMaterial({
+    color: [0xc8452c, 0x2d5b8e, 0xd9b23a, 0x3c6e46, 0xe8e2d4][Math.floor(rng() * 5)], roughness: 0.9,
+  });
+  const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.8, 6), M.woodDark);
+  legs.position.y = 0.4; g.add(legs);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.45, 3, 8), jacket);
+  torso.position.y = 1.12; g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xd9a97e, roughness: 0.8 }));
+  head.position.y = 1.62; g.add(head);
+  return g;
+}
+
 // a small moored sailing yacht (~8 m) — sleek hull, low cabin, bare mast + boom
 // with the main furled, a cousin of the boat you're sailing. bow at +Z.
 function smallSailboat(rng) {
@@ -144,7 +160,7 @@ function gull() {
 export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
-  const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [] };
+  const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [], walkers: [] };
 
   const big = activeSet.filter((i) => i.A > 40000);
 
@@ -225,6 +241,10 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   let segs = 0;
   for (const line of (region.piers || [])) {
     if (segs >= 300) break;
+    // a pier must come FROM somewhere: skip lines whose every point floats in
+    // open water (real piers of islets our chart draws smaller, or not at all)
+    const touchesLand = line.some(([px, pz]) => heightAt(px, pz) > -1.6);
+    if (!touchesLand) continue;
     for (let i = 0; i < line.length - 1 && segs < 300; i++) {
       const [x1, z1] = line[i], [x2, z2] = line[i + 1];
       const L = Math.hypot(x2 - x1, z2 - z1);
@@ -306,7 +326,8 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // ── small boats moored alongside the real piers — the guest harbours ──
   let moored = 0;
   for (const line of (region.piers || [])) {
-    if (moored >= 30) break;
+    if (moored >= 60) break;
+    if (!line.some(([px2, pz2]) => heightAt(px2, pz2) > -1.6)) continue;   // same land test
     let best = null, bd = 0;                       // seaward pier end = deepest water
     for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
     if (!best || bd < 0.7) continue;
@@ -314,19 +335,37 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     let dx = px - line[0][0], dz = pz - line[0][1];
     const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
     const rx = dz, rz = -dx;                               // abeam the pier
-    const nBoats = 1 + Math.floor(rng() * 3);             // 1–3 berthed here
-    for (let k = 0; k < nBoats && moored < 30; k++) {
+    const nBoats = 2 + Math.floor(rng() * 4);             // 2–5 berthed here — a real harbour
+    for (let k = 0; k < nBoats && moored < 60; k++) {
       const along = 3 + k * 4.5, side = (k % 2 ? 1 : -1) * (2.6 + rng() * 0.8);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
       const r = rng();
-      const b = r < 0.4 ? motorboat(rng) : r < 0.72 ? smallSailboat(rng) : rowboat(rng);
+      const b = r < 0.5 ? smallSailboat(rng) : r < 0.8 ? motorboat(rng) : rowboat(rng);
       b.position.set(bx, 0, bz);
       b.rotation.y = Math.atan2(dx, dz) + (rng() - 0.5) * 0.35;   // roughly along the pier
       group.add(b);
       dyn.moored.push(b);
       moored++;
     }
+  }
+
+  // ── people: small figures strolling the docks and quays ──
+  let walkers = 0;
+  for (const line of (region.piers || [])) {
+    if (walkers >= 10) break;
+    if (line.length < 2 || rng() < 0.45) continue;
+    if (!line.some(([px2, pz2]) => heightAt(px2, pz2) > -1.6)) continue;
+    const [ax, az] = line[0], [bx2, bz2] = line[line.length - 1];
+    const L = Math.hypot(bx2 - ax, bz2 - az);
+    if (L < 8) continue;
+    const isQuay = L > 42;
+    const p = person(rng);
+    p.userData = { ax, az, bx: bx2, bz: bz2, t: rng(), dir: rng() < 0.5 ? 1 : -1,
+                   speed: (0.55 + rng() * 0.35) / L, deckY: isQuay ? 1.1 : 0.58 };
+    group.add(p);
+    dyn.walkers.push(p);
+    walkers++;
   }
 
   // ── a few small boats puttering around the region's open water ──
@@ -378,6 +417,15 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       b.position.y = (waveHeightAt ? waveHeightAt(b.position.x, b.position.z, t) : 0) * 0.85;
       b.rotation.y = u.heading;
       b.rotation.z = Math.sin(t * 1.3 + u.phase) * 0.05 - u.turn * u.side * 0.15;
+    }
+    for (const p of dyn.walkers) {                   // stroll the pier, turn at the ends
+      const u = p.userData;
+      u.t += u.speed * u.dir * dt;
+      if (u.t > 1) { u.t = 1; u.dir = -1; }
+      if (u.t < 0) { u.t = 0; u.dir = 1; }
+      const x = u.ax + (u.bx - u.ax) * u.t, z = u.az + (u.bz - u.az) * u.t;
+      p.position.set(x, u.deckY + Math.abs(Math.sin(t * 4.2 + u.ax)) * 0.03, z);   // step bob
+      p.rotation.y = Math.atan2((u.bx - u.ax) * u.dir, (u.bz - u.az) * u.dir);
     }
   }
 

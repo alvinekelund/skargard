@@ -439,5 +439,25 @@ export function detailSwan36(swan, renderer = null) {
   dorades.castShadow = true;
   swan.add(dorades);
 
+  // 17. portlights — four smoked-glass ovals per side of the trunk, following
+  //     its taper, with a faint warm glow (there's a lamp lit below, after all)
+  const PORT_MAT = new THREE.MeshPhysicalMaterial({
+    color: 0x141a20, roughness: 0.08, clearcoat: 1.0, clearcoatRoughness: 0.08,
+    emissive: 0xffb45e, emissiveIntensity: 0.28, envMapIntensity: 1.0,
+  });
+  const portGeos = [];
+  const trunkHW = (x) => 0.95 - 0.111 * (x + 1.25) + 0.095;   // plan taper + bevel, slightly proud
+  for (const s of [1, -1]) {
+    for (const px of [-0.7, -0.1, 0.5, 1.1]) {
+      const gp = new THREE.BoxGeometry(0.36, 0.14, 0.03);
+      gp.rotateY(s * 0.111);                                   // lie flat on the tapering wall
+      gp.translate(px, 1.13, trunkHW(px) * s);
+      portGeos.push(gp);
+    }
+  }
+  const portlights = new THREE.Mesh(mergeGeometries(portGeos), PORT_MAT);
+  portlights.castShadow = false;
+  swan.add(portlights);
+
   return swan;
 }
