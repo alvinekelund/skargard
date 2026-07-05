@@ -242,6 +242,15 @@ function gull() {
 export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
+
+  // dense regions (inner Nauvo) hold THOUSANDS of features against render caps
+  // of a few hundred — consumed in OSM-fetch array order, which starved whole
+  // villages (Biskopsö: 101 buildings in data, 1 rendered). Render the NEAREST
+  // features to the boat instead, so wherever you sail, that place is real.
+  const cdist = (x, z) => (x - center.x) ** 2 + (z - center.y) ** 2;
+  if (region.buildings) region.buildings.sort((a, b) => cdist(a[0], a[1]) - cdist(b[0], b[1]));
+  if (region.piers) region.piers.sort((a, b) => cdist(a[0][0], a[0][1]) - cdist(b[0][0], b[0][1]));
+  if (region.seamarks) region.seamarks.sort((a, b) => cdist(a[0], a[1]) - cdist(b[0], b[1]));
   const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [], walkers: [] };
 
   const big = activeSet.filter((i) => i.A > 40000);
@@ -300,7 +309,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // ── the REAL buildings (OSM footprints: position, size, orientation, class) ──
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
-    if (placed >= 350) break;
+    if (placed >= 450) break;
     const ground = heightAt(bx, bz);
     if (ground < -1.2) continue;                          // skip footprints over open water
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
@@ -322,12 +331,12 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   //    (a 100 m run is a harbour breakwater, not a floating 2 m plank) ──
   let segs = 0;
   for (const line of (region.piers || [])) {
-    if (segs >= 300) break;
+    if (segs >= 420) break;
     // a pier must come FROM somewhere: skip lines whose every point floats in
     // open water (real piers of islets our chart draws smaller, or not at all)
     const touchesLand = line.some(([px, pz]) => heightAt(px, pz) > -1.6);
     if (!touchesLand) continue;
-    for (let i = 0; i < line.length - 1 && segs < 300; i++) {
+    for (let i = 0; i < line.length - 1 && segs < 420; i++) {
       const [x1, z1] = line[i], [x2, z2] = line[i + 1];
       const L = Math.hypot(x2 - x1, z2 - z1);
       if (L < 1.0 || L > 200) continue;

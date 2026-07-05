@@ -80,7 +80,7 @@ export function createHUD() {
       `${sw('#2fd6c4')} elevation measured on ${info.measured} (${info.gridded} with interior relief grid, EU-DEM ~25 m)\n` +
       `${sw('#ff9b45')} ${info.islands - info.measured} skerries below raster resolution → procedural height\n` +
       `${sw('#46d95e')} ${info.wood} wood ${sw('#c46bd4')} ${info.heath} heath ${sw('#e0cf4a')} ${info.scrub} scrub polygons drive ground + trees\n` +
-      `· buildings ${info.buildings}/${info.buildingsTotal} · pier segments ${info.pierSegs}/${info.pierSegsTotal} · seamarks ${info.seamarks}/${info.seamarksTotal} — rendered / in region data (render caps 350/380/90)\n` +
+      `· buildings ${info.buildings}/${info.buildingsTotal} · pier segments ${info.pierSegs}/${info.pierSegsTotal} · seamarks ${info.seamarks}/${info.seamarksTotal} — rendered / in region data (nearest-first, render caps 450/420/90)\n` +
       `<b style="color:#f0b28a">procedural</b>\n` +
       `· island height PROFILES between shore and peak · bathymetry\n` +
       `· rock texture, tree/boulder models + placement (inside real polygons)\n` +
