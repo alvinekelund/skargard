@@ -128,6 +128,56 @@ function leafTexture(seed) {
   return t;
 }
 
+// upward blade strokes with alpha — a grass tuft card texture
+function grassTexture(seed) {
+  const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  const rng = mulberry32(seed);
+  ctx.clearRect(0, 0, S, S);
+  for (let i = 0; i < 90; i++) {
+    const x = 8 + rng() * (S - 16);
+    const lean = (x - S / 2) * 0.35 + (rng() - 0.5) * 18;
+    const hgt = S * (0.45 + rng() * 0.5);
+    const gsh = 120 + rng() * 80;
+    ctx.strokeStyle = `rgba(${gsh * 0.9 | 0},${gsh | 0},${gsh * 0.45 | 0},${0.6 + rng() * 0.4})`;
+    ctx.lineWidth = 1.2 + rng() * 1.8;
+    ctx.beginPath();
+    ctx.moveTo(x, S);
+    ctx.quadraticCurveTo(x + lean * 0.3, S - hgt * 0.6, x + lean, S - hgt);
+    ctx.stroke();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+// two crossed cards → an instanced grass tuft (the 'field' biome, in 3D)
+function grassGeometry() {
+  const parts = [];
+  for (const ry of [0, Math.PI / 2]) {
+    const p = new THREE.PlaneGeometry(0.7, 0.45);
+    p.translate(0, 0.22, 0);
+    p.rotateY(ry);
+    parts.push(paint(p, new THREE.Color(0x8a8d52)));
+  }
+  return BufferGeometryUtils.mergeGeometries(parts, false);
+}
+
+// a low rounded coastal rock slab — the smooth glaciated plates the Finnish
+// shore is made of (wider and flatter than a moraine boulder, lighter grey)
+function slabGeometry(rng) {
+  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const lump = 1 + 0.1 * Math.sin(x * 2.4 + 0.8) * Math.cos(z * 2.1) + 0.06 * Math.sin(y * 3.1);
+    p.setXYZ(i, x * 1.45 * lump, Math.max(y, -0.15) * 0.32 * lump, z * 1.15 * lump);
+  }
+  geo.computeVertexNormals();
+  return paint(geo, new THREE.Color(0x8d867a).lerp(new THREE.Color(0x9a8a80), rng()));
+}
+
 // a ragged, narrow spruce/pine spire — trunk and canopy split so bark stays
 // solid while the foliage gets alpha-tested needle texture
 function pineGeometry(rng) {
@@ -379,7 +429,7 @@ export function inRing(x, z, r) {
   return inside;
 }
 
-export function buildArchipelago(scene, env, mapData, realData, coverData = null) {
+export function buildArchipelago(scene, env, mapData, realData, coverData = null, roadsData = null) {
   const group = new THREE.Group();
   scene.add(group);
   const shaders = [];
@@ -500,12 +550,17 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   const juniperMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.85, sway: 0.05, swayLo: 0.2, swayHi: 1.2, rimStrength: 0.35 });
   juniperMat.map = leafTex; juniperMat.alphaTest = 0.35; juniperMat.side = THREE.DoubleSide;
+  const grassTex = grassTexture(91);
+  const grassMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.9, sway: 0.16, swayLo: 0.0, swayHi: 0.45, rimStrength: 0.4 });
+  grassMat.map = grassTex; grassMat.alphaTest = 0.28; grassMat.side = THREE.DoubleSide;
   const pineGeo = pineGeometry(mulberry32(1));
   const birchGeo = birchGeometry(mulberry32(2));
   const juniperGeo = juniperGeometry(mulberry32(3));
   const boulderGeo = boulderGeometry(mulberry32(4));
+  const grassGeo = grassGeometry();
+  const slabGeo = slabGeometry(mulberry32(6));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
-  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [];
+  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [], grassMats = [], slabMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
   // ── islands from the REAL chart: every polygon is an actual island outline
@@ -545,6 +600,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     });
   }
 
+  // real roads (OSM highways) with bboxes for region filtering
+  const roads = (roadsData && roadsData.roads ? roadsData.roads : []).map((r) => {
+    let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
+    for (const [x, z] of r.p) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    return { c: r.c, p: r.p, minX, minZ, maxX, maxZ };
+  });
+
   // real land cover: wood/forest (c=0), heath (1), scrub (2) — with bboxes
   const nature = (realData && realData.nature ? realData.nature : []).map((n) => {
     let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
@@ -559,6 +624,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
   let treeBudget = 6500;
+  let grassBudget = 4500, slabBudget = 1300;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
@@ -725,6 +791,46 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       boulderMats.push(_m.clone());
       bp++;
     }
+
+    // ── the biomes in 3D, straight off the satellite grid: grass tufts on
+    //    every 'field' node, smooth rock slabs on low 'rock' ground ──
+    if (satGrid && (grassBudget > 0 || slabBudget > 0)) {
+      const c = isl.cover;
+      if (!c._v) c._v = Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0));
+      for (let iz = 0; iz < c.nz; iz++) {
+        for (let ix = 0; ix < c.nx; ix++) {
+          const cls = c._v[iz * c.nx + ix];
+          if (cls !== 2 && cls !== 3) continue;
+          const nlx = c.x0 + ix * c.dx, nlz = c.z0 + iz * c.dz;
+          if (cls === 2 && grassBudget > 0) {
+            const tufts = Math.min(3, grassBudget);
+            for (let k = 0; k < tufts; k++) {
+              const glx = nlx + (treeRng() - 0.5) * c.dx, glz = nlz + (treeRng() - 0.5) * c.dz;
+              const gy = islandHeight(glx, glz, isl);
+              if (gy < 0.35) continue;
+              const sc = 0.8 + treeRng() * 1.3;
+              _p.set(cx + glx, gy - 0.03, cz + glz);
+              _s.set(sc, sc * (0.8 + treeRng() * 0.5), sc);
+              _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+              _m.compose(_p, _q, _s);
+              grassMats.push(_m.clone());
+              grassBudget--;
+            }
+          } else if (cls === 3 && slabBudget > 0 && treeRng() < 0.2) {
+            const slx = nlx + (treeRng() - 0.5) * c.dx, slz = nlz + (treeRng() - 0.5) * c.dz;
+            const sy = islandHeight(slx, slz, isl);
+            if (sy < 0.2 || sy > 5.0) continue;            // the smooth coastal shelves
+            const sc = 1.1 + treeRng() * 2.6;
+            _p.set(cx + slx, sy - 0.25, cz + slz);
+            _s.set(sc * (0.8 + treeRng() * 0.5), sc * 0.5, sc * (0.8 + treeRng() * 0.5));
+            _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+            _m.compose(_p, _q, _s);
+            slabMats.push(_m.clone());
+            slabBudget--;
+          }
+        }
+      }
+    }
     perf.scatter += performance.now() - tp;
   }
 
@@ -822,9 +928,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, depthNeedle, depthLeaf]) m.__shared = true;
-  for (const t of [needleTex, leafTex, rockD, rockN, rockR]) t.__shared = true;
-  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo]) g.__shared = true;
+  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
+  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo]) g.__shared = true;
 
   function makeInstanced(geo, mat, mats, depthMat = null) {
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(mats.length, 1));
@@ -836,28 +942,105 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     return mesh;
   }
 
+  // real roads, draped over the terrain as gravel ribbons (one merged mesh).
+  // Samples every ~12 m; runs break where the road would dip underwater
+  // (the chart draws some islands smaller than the road network knows them).
+  function buildRoadMesh(regionRoads) {
+    const pos = [], col = [], idx = [];
+    const cMajor = new THREE.Color(0x8d8474), cMinor = new THREE.Color(0x7d7160);
+    for (const rd of regionRoads) {
+      const hw = rd.c === 1 ? 1.9 : 1.25;
+      const cc = rd.c === 1 ? cMajor : cMinor;
+      // a road lives on one island (occasionally two) — probe only those,
+      // not every island in the region, or draping costs seconds at Nauvo
+      const hosts = activeSet.filter((i) =>
+        rd.maxX > i.x + i.bbox.minX && rd.minX < i.x + i.bbox.maxX &&
+        rd.maxZ > i.z + i.bbox.minZ && rd.minZ < i.z + i.bbox.maxZ);
+      const hAt = (x, z) => {
+        let m = -10;
+        for (const i of hosts) {
+          const lx = x - i.x, lz = z - i.z, b = i.bbox;
+          if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
+          const h = islandHeight(lx, lz, i);
+          if (h > m) m = h;
+        }
+        return m;
+      };
+      let run = [];
+      const flush = () => {
+        if (run.length > 1) {
+          const base = pos.length / 3;
+          for (let i = 0; i < run.length; i++) {
+            const [x, y, z] = run[i];
+            const a = run[Math.max(i - 1, 0)], b2 = run[Math.min(i + 1, run.length - 1)];
+            let tx = b2[0] - a[0], tz = b2[2] - a[2];
+            const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
+            pos.push(x - tz * hw, y, z + tx * hw, x + tz * hw, y, z - tx * hw);
+            col.push(cc.r, cc.g, cc.b, cc.r, cc.g, cc.b);
+          }
+          for (let i = 0; i < run.length - 1; i++) {
+            const a = base + i * 2;
+            idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+          }
+        }
+        run = [];
+      };
+      for (let i = 0; i < rd.p.length - 1; i++) {
+        const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
+        const segL = Math.hypot(x2 - x1, z2 - z1);
+        const steps = Math.max(1, Math.round(segL / 12));
+        for (let s2 = 0; s2 <= (i === rd.p.length - 2 ? steps : steps - 1); s2++) {
+          const t = s2 / steps;
+          const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
+          const y = hAt(x, z);
+          if (y < 0.25) { flush(); continue; }
+          run.push([x, y + 0.14, z]);
+        }
+      }
+      flush();
+    }
+    if (!idx.length) return null;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, roadMat);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+  const roadMat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.96, metalness: 0,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  roadMat.__shared = true;
+
+  // ── TIME-SLICED region builds: the per-island geometry work (the expensive
+  //    part — seconds in the dense Nauvo interior) is spread across frames
+  //    while the OLD region stays on screen; the swap happens at finalize.
+  //    A teleport burns a bigger first slice so it still feels immediate. ──
+  let job = null;
+
   function rebuild(cx0, cz0) {
-    const t0 = performance.now();
     perf.mesh = perf.color = perf.scatter = 0;
-    disposeActive();
-    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = [];
+    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = [];
     treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
-    landmark = null;
+    grassBudget = 4500; slabBudget = 1300;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
     // islands whose bbox touches the build square, nearest first
-    activeSet = [];
+    let set = [];
     for (const i of islands) {
       const dx = Math.max(Math.abs(i.x - cx0) - (i.bbox.maxX - i.bbox.minX) / 2, 0);
       const dz = Math.max(Math.abs(i.z - cz0) - (i.bbox.maxZ - i.bbox.minZ) / 2, 0);
-      if (dx < RBUILD && dz < RBUILD) activeSet.push(i);
+      if (dx < RBUILD && dz < RBUILD) set.push(i);
     }
-    activeSet.sort((a, b) =>
+    set.sort((a, b) =>
       ((a.x - cx0) ** 2 + (a.z - cz0) ** 2) - ((b.x - cx0) ** 2 + (b.z - cz0) ** 2));
-    if (activeSet.length > MAX_ISLANDS) activeSet = activeSet.slice(0, MAX_ISLANDS);
+    if (set.length > MAX_ISLANDS) set = set.slice(0, MAX_ISLANDS);
 
-    for (const isl of activeSet) {
+    for (const isl of set) {
       // real land cover intersecting this island (world-coord polygons w/ bbox)
       isl._wood = []; isl._heath = []; isl._scrub = [];
       const bx0 = isl.x + isl.bbox.minX, bx1 = isl.x + isl.bbox.maxX;
@@ -868,8 +1051,26 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         else if (n.c === 1) isl._heath.push(n);
         else if (n.c === 2) isl._scrub.push(n);
       }
-      buildIsland(isl);
     }
+    job = { set, i: 0, cx0, cz0, t0: performance.now() };
+    stepRebuild(40);                      // a generous first slice: teleports feel instant
+  }
+
+  function stepRebuild(budgetMs = 7) {
+    if (!job) return;
+    const tS = performance.now();
+    while (job.i < job.set.length && performance.now() - tS < budgetMs) {
+      buildIsland(job.set[job.i++]);
+    }
+    if (job.i >= job.set.length) finalizeRebuild();
+  }
+
+  function finalizeRebuild() {
+    const { set, cx0, cz0, t0 } = job;
+    job = null;
+    disposeActive();                      // the old region leaves only now
+    activeSet = set;
+    landmark = null;
 
     // one merged mesh for the whole region → a single draw call
     if (geoParts.length) {
@@ -884,6 +1085,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     makeInstanced(birchGeo.canopy, birchMat, birchMats, depthLeaf);
     makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf);
     makeInstanced(boulderGeo, boulderMat, boulderMats);
+    makeInstanced(slabGeo, boulderMat, slabMats);
+    const grassMesh = makeInstanced(grassGeo, grassMat, grassMats);
+    grassMesh.castShadow = false;                     // tufts shade nothing; saves the shadow pass
 
     // the REAL Utö: Finland's oldest lighthouse + pilot village — when in range
     const uto = activeSet.find((i) => i.name === 'Utö');
@@ -915,10 +1119,21 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     // life: buoys marking channels, harbours, cottages, traffic, gulls, Utö extras
     const RB = RBUILD;
     const inBox = (x, z) => Math.abs(x - cx0) < RB && Math.abs(z - cz0) < RB;
+    // roads intersecting the region: rendered as terrain ribbons + given to
+    // props for the cars. Nearest-first, capped, like everything else.
+    const regionRoads = roads
+      .filter((r) => r.maxX > cx0 - RB && r.minX < cx0 + RB && r.maxZ > cz0 - RB && r.minZ < cz0 + RB)
+      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
+                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
+      .slice(0, 260);
+    const roadMesh = buildRoadMesh(regionRoads);
+    if (roadMesh) activeGroup.add(roadMesh);
+
     const region = {
       buildings: (realData?.buildings || []).filter((b) => inBox(b[0], b[1])),
       piers: (realData?.piers || []).filter((pl) => inBox(pl[0][0], pl[0][1])),
       seamarks: (realData?.seamarks || []).filter((m) => inBox(m[0], m[1])),
+      roads: regionRoads,
     };
     propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region });
     activeGroup.add(propsRef.group);
@@ -943,7 +1158,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     };
     debugGroup = null;                    // the old overlay died with disposeActive
     if (debugOn) buildDebugOverlay();
-    console.debug(`[rebuild] ${(performance.now() - t0).toFixed(0)}ms — mesh ${perf.mesh.toFixed(0)} · color ${perf.color.toFixed(0)} · scatter ${perf.scatter.toFixed(0)} · islands ${activeSet.length}`);
+    console.debug(`[rebuild] ${(performance.now() - t0).toFixed(0)}ms sliced — mesh ${perf.mesh.toFixed(0)} · color ${perf.color.toFixed(0)} · scatter ${perf.scatter.toFixed(0)} · islands ${activeSet.length}`);
+  }
+
+  // flush any in-flight region build synchronously (dev hooks want it done)
+  function rebuildSync(cx0, cz0) {
+    rebuild(cx0, cz0);
+    while (job) stepRebuild(1e9);
   }
 
   // max terrain height at a world point — used for boat↔island collision.
@@ -963,6 +1184,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   const _inv = new THREE.Matrix4();
   function update(dt, t, camera, sunDir) {
+    stepRebuild();                        // a slice of any in-flight region build
     camera.updateMatrixWorld();
     _inv.copy(camera.matrixWorld).invert();
     sunViewDir.copy(sunDir).transformDirection(_inv);
@@ -997,7 +1219,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   return {
-    group, update, islands, heightAt, rebuild, setDebug, toggleSatellite,
+    group, update, islands, heightAt, rebuild, rebuildSync, setDebug, toggleSatellite,
     get debugOn() { return debugOn; },
     get debugInfo() { return lastCounts; },
     get satOn() { return satOn; },

@@ -111,38 +111,81 @@ function cruiseFerry(scheme) {
   return g;
 }
 
-// a yellow double-ended road ferry (lossi): shaped symmetric hull, tire
-// fenders, railed car deck, lifting ramp gantries, offset wheelhouse
+// a yellow double-ended road ferry (lossi), rebuilt properly: shaped hull with
+// a black waterline, bulwarks with cap rails, fenders that actually hang on
+// the hull, A-frame ramp gantries with sheaves and cables, lane markings, a
+// glazed wheelhouse up on legs, life rings, nav masts
 function roadFerry() {
   const g = new THREE.Group();
-  const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c218, roughness: 0.6 });
-  const white = new THREE.MeshStandardMaterial({ color: 0xf0f0ea, roughness: 0.55 });
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c218, roughness: 0.55 });
+  const yellowD = new THREE.MeshStandardMaterial({ color: 0xcf9f0e, roughness: 0.6 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xf0f0ea, roughness: 0.5 });
+  const deckM = new THREE.MeshStandardMaterial({ color: 0x565a5e, roughness: 0.9 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.9 });
-  const hull = shipBlock(50, 12.5, 4.2, yellow, 0.1, 0.42);   // rounded both ends
-  hull.position.y = -1.4;
-  g.add(hull);
-  g.add(box(44, 1.3, 0.45, 0, 3.4, 5.9, yellow));             // bulwarks
-  g.add(box(44, 1.3, 0.45, 0, 3.4, -5.9, yellow));
+  const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.6, roughness: 0.4 });
+  const orange = new THREE.MeshStandardMaterial({ color: 0xe8631c, roughness: 0.6 });
+  const lane = new THREE.MeshStandardMaterial({ color: 0xe8e6da, roughness: 0.8 });
+
+  const hull = shipBlock(50, 12.5, 3.4, yellow, 0.1, 0.42);   // rounded both ends
+  hull.position.y = -0.6;
+  const boot = shipBlock(50.2, 12.7, 0.7, dark, 0.1, 0.42);   // waterline band
+  boot.position.y = -0.55;
+  g.add(hull, boot);
+  const deck = box(44, 0.15, 11.6, 0, 2.85, 0, deckM);        // car deck
+  g.add(deck);
   for (const s of [1, -1]) {
-    for (let k = 0; k < 6; k++) {                             // tire fenders
-      const tyre = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.22, 6, 10), dark);
-      tyre.position.set(-17.5 + k * 7, 1.5, s * 6.35);
+    g.add(box(44, 1.25, 0.4, 0, 3.5, s * 5.95, yellow));      // bulwark
+    g.add(box(44.2, 0.16, 0.62, 0, 4.16, s * 5.95, yellowD)); // cap rail
+    g.add(box(38, 0.08, 0.3, 0, 2.95, s * 3.1, lane));        // lane edge marking
+    for (let k = 0; k < 6; k++) {                             // fenders hung on the hull side
+      const tyre = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.16, 7, 12), dark);
+      tyre.position.set(-17.5 + k * 7, 1.35, s * 6.28);       // flat against the plating
       g.add(tyre);
+      const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.4, 4), dark);
+      rope.position.set(-17.5 + k * 7, 2.6, s * 6.22);
+      g.add(rope);
     }
-    const ramp = box(6, 0.4, 10.5, s * 26, 3.8, 0, yellow);   // raised ramps
-    ramp.rotation.z = s * 0.55;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.09, 6, 12), orange);
+    ring.position.set(s * 6, 3.75, s * 5.7); g.add(ring);     // life rings on the bulwark
+    // ramp + A-frame gantry with sheave and cables
+    const ramp = box(5.6, 0.35, 10.6, s * 25.6, 3.6, 0, yellow);
+    ramp.rotation.z = s * 0.52;
     g.add(ramp);
-    const gantry = box(0.5, 6, 0.5, s * 22.5, 5.5, 4.8, yellow);   // lifting gantries
-    const gantry2 = box(0.5, 6, 0.5, s * 22.5, 5.5, -4.8, yellow);
-    const beam = box(0.5, 0.5, 10.1, s * 22.5, 8.3, 0, yellow);
-    g.add(gantry, gantry2, beam);
+    for (const q of [1, -1]) {                                // A-frame legs lean together
+      const leg = box(0.45, 7, 0.45, s * 22.3, 5.8, q * 4.4, yellow);
+      leg.rotation.x = -q * 0.12;
+      g.add(leg);
+    }
+    g.add(box(0.5, 0.55, 8.6, s * 22.3, 9.05, 0, yellow));    // crossbeam
+    const sheave = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.3, 10), steel);
+    sheave.rotation.z = Math.PI / 2; sheave.position.set(s * 22.3, 9.0, 0);
+    g.add(sheave);
+    for (const q of [1, -1]) {                                // lift cables to the ramp corners
+      const a = new THREE.Vector3(s * 22.3, 8.9, q * 0.3);
+      const b = new THREE.Vector3(s * 27.6, 5.0, q * 4.6);
+      const d = b.clone().sub(a);
+      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, d.length(), 4), dark);
+      cable.position.copy(a).addScaledVector(d, 0.5);
+      cable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
+      g.add(cable);
+    }
   }
-  const house = box(4.5, 3.4, 3.6, 3, 6, 4.2, white);         // offset wheelhouse on legs
-  g.add(house);
-  g.add(box(0.35, 2.2, 0.35, 1.5, 3.6, 3.2, white), box(0.35, 2.2, 0.35, 4.5, 3.6, 5.2, white));
-  windows(4, 6.9, 6.05, g, 0.8);
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 3.4, 6), white);
-  mast.position.set(3, 9.2, 4.2); g.add(mast);
+  // glazed wheelhouse on four legs, offset to starboard like the real ones
+  for (const [lx, lz] of [[1.2, 3.0], [4.8, 3.0], [1.2, 5.4], [4.8, 5.4]]) {
+    g.add(box(0.3, 3.2, 0.3, lx, 4.6, lz, white));
+  }
+  g.add(box(4.6, 0.25, 3.4, 3, 6.2, 4.2, white));             // platform
+  g.add(box(4.2, 2.6, 3.0, 3, 7.6, 4.2, white));              // house
+  windows(3.8, 8.2, 5.75, g, 0.9);                            // glazing all around
+  windows(3.8, 8.2, 2.68, g, 0.9);
+  const wsSide = box(0.35, 0.9, 2.6, 0.95, 8.2, 4.2, new THREE.MeshStandardMaterial({
+    color: 0x1a2026, roughness: 0.4, emissive: 0xffc878, emissiveIntensity: 0.55 }));
+  g.add(wsSide);
+  g.add(box(4.5, 0.18, 3.3, 3, 9.05, 4.2, white));            // roof
+  const radar = box(1.3, 0.2, 0.28, 3, 9.5, 4.2, dark);
+  g.add(radar);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 2.6, 6), white);
+  mast.position.set(3, 10.4, 4.2); g.add(mast);
   return g;
 }
 

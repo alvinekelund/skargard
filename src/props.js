@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32 } from './noise.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -93,6 +94,26 @@ function motorboat(rng) {
   for (const s of [1, -1]) {                                       // rub rails
     const rub = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 3.2), M.woodDark);
     rub.position.set(0.66 * s, 0.55, -0.1); g.add(rub);
+  }
+  return g;
+}
+
+// a small car (~4 m): lower body, glazed cabin, four wheels. bow at +Z.
+function car(rng) {
+  const g = new THREE.Group();
+  const paintC = [0xd8d6d0, 0xb9382e, 0x2c4f7e, 0x23262b, 0x9aa0a6, 0x7c8b4e][Math.floor(rng() * 6)];
+  const bodyMat = new THREE.MeshStandardMaterial({ color: paintC, roughness: 0.35, metalness: 0.15 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.5, 4.0), bodyMat);
+  body.position.y = 0.62; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.56, 0.46, 2.2), M.glass);
+  cabin.position.set(0, 1.06, -0.25); g.add(cabin);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.07, 2.24), bodyMat);
+  roof.position.set(0, 1.31, -0.25); g.add(roof);
+  for (const [wx, wz] of [[0.82, 1.28], [-0.82, 1.28], [0.82, -1.28], [-0.82, -1.28]]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.22, 10), M.woodDark);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(wx, 0.32, wz);
+    g.add(wheel);
   }
   return g;
 }
@@ -251,7 +272,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   if (region.buildings) region.buildings.sort((a, b) => cdist(a[0], a[1]) - cdist(b[0], b[1]));
   if (region.piers) region.piers.sort((a, b) => cdist(a[0][0], a[0][1]) - cdist(b[0][0], b[0][1]));
   if (region.seamarks) region.seamarks.sort((a, b) => cdist(a[0], a[1]) - cdist(b[0], b[1]));
-  const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [], walkers: [] };
+  const dyn = { buoys: [], traffic: [], gulls: [], moored: [], smallCraft: [], walkers: [], cars: [] };
 
   const big = activeSet.filter((i) => i.A > 40000);
 
@@ -306,24 +327,84 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     marks++;
   }
 
-  // ── the REAL buildings (OSM footprints: position, size, orientation, class) ──
+  // ── the REAL buildings (OSM footprints: position, size, orientation, class).
+  //    Proper Finnish timber houses now: stone plinth, wall, GABLED roof with
+  //    the ridge along the long axis and real eaves, a chimney on dwellings,
+  //    and warm lit windows — everything merged into two draw calls. ──
+  const bodyGeos = [], winGeos = [];
+  const paintGeo = (geo, color) => {
+    geo = geo.index ? geo.toNonIndexed() : geo;
+    const n = geo.attributes.position.count;
+    const cArr = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { cArr[i * 3] = color.r; cArr[i * 3 + 1] = color.g; cArr[i * 3 + 2] = color.b; }
+    geo.setAttribute('color', new THREE.BufferAttribute(cArr, 3));
+    return geo;
+  };
+  const C_RED = new THREE.Color(0x8a3326), C_DKRED = new THREE.Color(0x76281c);
+  const C_GREY = new THREE.Color(0xb9b4a6), C_WHITE = new THREE.Color(0xe8e6df);
+  const C_YELL = new THREE.Color(0xc9a55a);
+  const C_ROOF = new THREE.Color(0x3a3532), C_ROOF2 = new THREE.Color(0x51413a), C_TILE = new THREE.Color(0x6e3a2c);
+  const C_PLINTH = new THREE.Color(0x77726a), C_CHIM = new THREE.Color(0xcfcac0);
+  const _c = new THREE.Color();
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
     if (placed >= 450) break;
     const ground = heightAt(bx, bz);
     if (ground < -1.2) continue;                          // skip footprints over open water
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
-    const h = cls === 2 ? 5.5 : cls === 1 ? 2.1 : 2.9;
-    const wall = cls === 2 ? M.white : (rng2() < 0.72 ? M.falunRed : (rng2() < 0.5 ? M.greyWall : M.white));
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(bw, h, bd), wall);
-    body.position.y = h / 2; g.add(body);
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, Math.hypot(bw, bd) * 0.42, h * 0.55, 4), M.roof);
-    roof.rotation.y = Math.PI / 4; roof.position.y = h + h * 0.27; g.add(roof);
-    g.position.set(bx, Math.max(ground, 0.25) - 0.06, bz);
-    g.rotation.y = ang;
-    group.add(g);
+    const baseY = Math.max(ground, 0.25) - 0.06;
+    const h = cls === 2 ? 5.0 : cls === 1 ? 2.0 : 2.7;
+    const r = rng2();
+    const wallC = cls === 2 ? C_WHITE
+      : r < 0.66 ? (rng2() < 0.3 ? C_DKRED : C_RED)
+      : r < 0.82 ? C_GREY : (rng2() < 0.5 ? C_WHITE : C_YELL);
+    const roofC = cls === 2 ? C_ROOF : rng2() < 0.2 ? C_TILE : (rng2() < 0.5 ? C_ROOF : C_ROOF2);
+    // ridge runs along the LONG axis of the real footprint
+    const along = bw >= bd ? bw : bd, across = bw >= bd ? bd : bw;
+    const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
+    const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
+    const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
+    // plinth + walls (footprint axes, not ridge axes)
+    bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, 0.3, bd + 0.14).translate(0, 0.15, 0), C_PLINTH)));
+    bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, h, bd).translate(0, h / 2 + 0.24, 0), wallC)));
+    // gabled roof: triangle profile extruded along the ridge, with eaves
+    const ov = Math.min(0.35, across * 0.12);
+    const rw = across + ov * 2, rl = along + ov * 2;
+    const roofH = Math.max(across * (cls === 2 ? 0.62 : 0.42), 0.7);
+    const shape = new THREE.Shape();
+    shape.moveTo(-rw / 2, 0); shape.lineTo(rw / 2, 0); shape.lineTo(0, roofH); shape.closePath();
+    const roofGeo = new THREE.ExtrudeGeometry(shape, { depth: rl, bevelEnabled: false });
+    roofGeo.translate(0, h + 0.22, -rl / 2);
+    roofGeo.rotateY(Math.PI / 2);                        // extrusion → along the ridge
+    bodyGeos.push(place(paintGeo(roofGeo, roofC)));
+    // chimney near the ridge third-point on dwellings
+    if (cls === 0 && rng2() < 0.85) {
+      bodyGeos.push(place(paintGeo(
+        new THREE.BoxGeometry(0.42, 0.9, 0.42).translate(along * (rng2() < 0.5 ? 0.22 : -0.22), h + roofH * 0.75, 0), C_CHIM)));
+    }
+    // warm windows on both long walls (dwellings + churches)
+    if (cls !== 1) {
+      const nWin = Math.max(1, Math.min(3, Math.round(along / 3.2)));
+      for (let wj = 0; wj < nWin; wj++) {
+        const wx = (wj - (nWin - 1) / 2) * (along / (nWin + 0.4));
+        for (const s of [1, -1]) {
+          winGeos.push(place(new THREE.BoxGeometry(0.55, 0.7, 0.06)
+            .rotateY(Math.PI / 2).translate(wx, h * 0.55 + 0.24, s * (across / 2 + 0.02))));
+        }
+      }
+    }
     placed++;
+  }
+  if (bodyGeos.length) {
+    const bodies = new THREE.Mesh(mergeGeometries(bodyGeos, false),
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    bodies.castShadow = true; bodies.receiveShadow = true;
+    group.add(bodies);
+  }
+  if (winGeos.length) {
+    const wins = new THREE.Mesh(mergeGeometries(winGeos.map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
+      new THREE.MeshStandardMaterial({ color: 0x201a14, roughness: 0.4, emissive: 0xffc06a, emissiveIntensity: 0.5 }));
+    group.add(wins);
   }
 
   // ── the REAL piers (OSM man_made=pier): short runs → wooden finger docks on
@@ -449,6 +530,39 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
   }
 
+  // ── cars: parked along the village roads, a couple actually driving ──
+  const roadLines = (region.roads || []).filter((r) => r.p.length > 1);
+  let parked = 0;
+  for (const rd of roadLines) {
+    if (parked >= 6) break;
+    if (rng() < 0.55) continue;
+    const i = Math.floor(rng() * (rd.p.length - 1));
+    const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
+    const t = rng();
+    const px = x1 + (x2 - x1) * t, pz = z1 + (z2 - z1) * t;
+    const gy = heightAt(px, pz);
+    if (gy < 0.3) continue;
+    const cv = car(rng);
+    // pulled to the verge, facing along the road
+    const ang = Math.atan2(x2 - x1, z2 - z1);
+    cv.position.set(px + Math.cos(ang) * 2.1 * (rng() < 0.5 ? 1 : -1), gy + 0.1, pz - Math.sin(ang) * 2.1);
+    cv.rotation.y = ang + (rng() - 0.5) * 0.15;
+    group.add(cv);
+    parked++;
+  }
+  // driving: the two longest roads in the region each get a car on its rounds
+  const byLen = [...roadLines].map((rd) => {
+    let L = 0; const seg = [];
+    for (let i = 0; i < rd.p.length - 1; i++) { const d = Math.hypot(rd.p[i + 1][0] - rd.p[i][0], rd.p[i + 1][1] - rd.p[i][1]); seg.push(d); L += d; }
+    return { rd, seg, L };
+  }).filter((r) => r.L > 220).sort((a, b) => b.L - a.L).slice(0, 2);
+  for (const r of byLen) {
+    const cv = car(rng);
+    cv.userData = { rd: r.rd, seg: r.seg, total: r.L, s: rng() * r.L, dir: rng() < 0.5 ? 1 : -1, speed: 6 + rng() * 3 };
+    group.add(cv);
+    dyn.cars.push(cv);
+  }
+
   // ── people: small figures strolling the docks and quays ──
   let walkers = 0;
   for (const line of (region.piers || [])) {
@@ -520,6 +634,27 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       b.position.y = (waveHeightAt ? waveHeightAt(b.position.x, b.position.z, t) : 0) * 0.85;
       b.rotation.y = u.heading;
       b.rotation.z = Math.sin(t * 1.3 + u.phase) * 0.05 - u.turn * u.side * 0.15;
+    }
+    for (const cv of dyn.cars) {                     // drive the road, turn at the ends
+      const u = cv.userData;
+      u.s += u.speed * u.dir * dt;
+      if (u.s > u.total) { u.s = u.total; u.dir = -1; }
+      if (u.s < 0) { u.s = 0; u.dir = 1; }
+      let acc = 0, px = u.rd.p[0][0], pz = u.rd.p[0][1], yaw = 0;
+      for (let i = 0; i < u.seg.length; i++) {
+        if (u.s <= acc + u.seg[i]) {
+          const tt = (u.s - acc) / u.seg[i];
+          const [x1, z1] = u.rd.p[i], [x2, z2] = u.rd.p[i + 1];
+          px = x1 + (x2 - x1) * tt; pz = z1 + (z2 - z1) * tt;
+          yaw = Math.atan2((x2 - x1) * u.dir, (z2 - z1) * u.dir);
+          break;
+        }
+        acc += u.seg[i];
+      }
+      const gy = heightAt(px, pz);
+      cv.visible = gy > 0.25;                        // the chart draws some islands smaller
+      cv.position.set(px, Math.max(gy, 0.25) + 0.08, pz);
+      cv.rotation.y = yaw;
     }
     for (const p of dyn.walkers) {                   // stroll the pier, turn at the ends
       const u = p.userData;

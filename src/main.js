@@ -46,7 +46,10 @@ const realData = await (await fetch(import.meta.env.BASE_URL + 'archipelago_data
 // satellite-classified land cover (forest/field/rock/heath per island) — optional
 const coverData = await fetch(import.meta.env.BASE_URL + 'archipelago_cover.json')
   .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-const archipelago = buildArchipelago(scene, env, mapData, realData, coverData);
+// the real road network (OSM highways) — ribbons on the terrain, cars on them
+const roadsData = await fetch(import.meta.env.BASE_URL + 'archipelago_roads.json')
+  .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const archipelago = buildArchipelago(scene, env, mapData, realData, coverData, roadsData);
 const boat = createBoat(scene);
 
 // spawn in open water off Utö, bow pointed toward Jurmo, and stream that region in

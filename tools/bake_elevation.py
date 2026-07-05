@@ -27,7 +27,7 @@ Z = 12                              # ~19 m/px ground at 60°N ≈ EU-DEM native
 N = 2 ** Z
 URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
-GRID_AREA = 150_000                 # m² — islands above this get a height grid
+GRID_AREA = 40_000                 # m² — islands above this get a height grid
 GRID_STEP_MIN = 45.0                # m — never store nodes denser than this
 GRID_MAX_NODES = 440
 CLIP_MAX = 80.0                     # m — nothing in the Archipelago Sea is higher
