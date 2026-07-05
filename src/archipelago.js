@@ -27,6 +27,7 @@ const COL = {
   heathBr:new THREE.Color(0x836b4c), // rusty heath
   floor:  new THREE.Color(0x44502d), // mossy forest floor (under real wood polys)
   scrubG: new THREE.Color(0x4b5a38), // grey-green juniper scrub carpet
+  field:  new THREE.Color(0x91945c), // open dry meadow (satellite 'field' class)
   pine:   new THREE.Color(0x1f3a1e),
   pineDk: new THREE.Color(0x122610),
   juniper:new THREE.Color(0x36482e), // low dark-green shore bush
@@ -342,6 +343,19 @@ function nameSprite(text) {
   return spr;
 }
 
+// satellite land-cover class at a local island point: 0 none · 1 forest ·
+// 2 field · 3 rock · 4 heath. −1 = no data for this island. Grids are baked
+// from the same Esri imagery the terrain wears (tools/bake_landcover.py).
+function coverAt(isl, lx, lz) {
+  const c = isl.cover;
+  if (!c) return -1;
+  if (c.d !== undefined) return c.d;                 // small islet: dominant class
+  if (!c._v) c._v = Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0));
+  const ix = Math.round((lx - c.x0) / c.dx), iz = Math.round((lz - c.z0) / c.dz);
+  if (ix < 0 || iz < 0 || ix >= c.nx || iz >= c.nz) return 0;
+  return c._v[iz * c.nx + ix];
+}
+
 // is a world point inside any of the land-cover entries ({p: ring, minX..maxZ})?
 function inCover(list, x, z) {
   for (const n of list) {
@@ -361,7 +375,7 @@ export function inRing(x, z, r) {
   return inside;
 }
 
-export function buildArchipelago(scene, env, mapData, realData) {
+export function buildArchipelago(scene, env, mapData, realData, coverData = null) {
   const group = new THREE.Group();
   scene.add(group);
   const shaders = [];
@@ -488,7 +502,10 @@ export function buildArchipelago(scene, env, mapData, realData) {
   //    from OSM (Utö–Jurmo region, Archipelago Sea), uniformly compressed. ──
   const rng = mulberry32(20260613);
   const islands = [];
+  const coverIslands = (coverData && coverData.islands) || null;
+  let recIndex = -1;
   for (const rec of (mapData ? mapData.islands : [])) {
+    recIndex++;
     const pts = rec.p;
     let cx = 0, cz = 0;
     for (const [x, z] of pts) { cx += x; cz += z; }
@@ -512,6 +529,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
       S: THREE.MathUtils.clamp(Math.sqrt(A) * 0.14, 4, 30),
       kind, name: rec.n || null,
       realElev: e > 0, grid: rec.g || null,
+      cover: coverIslands ? coverIslands[String(recIndex)] || null : null,   // satellite-classified land cover
     });
   }
 
@@ -567,8 +585,11 @@ export function buildArchipelago(scene, env, mapData, realData) {
         const surf = THREE.MathUtils.smoothstep(y, 0.02, 0.1) * (1 - THREE.MathUtils.smoothstep(y, 0.14, 0.26));
         tmp.lerp(COL.foam, surf * grain * 0.3);
       } else {
-        let cover = 0;                               // 0 unmapped · 1 wood · 2 heath · 3 scrub
-        if (hasCoverPolys) {
+        let cover = 0;                               // 0 unmapped · 1 wood · 2 heath · 3 scrub · 4 field
+        if (isl.cover) {                             // the satellite classification decides
+          const sc = coverAt(isl, lx, lz);
+          cover = sc === 1 ? 1 : sc === 4 ? 2 : sc === 2 ? 4 : 0;   // photo forest/heath/field
+        } else if (hasCoverPolys) {
           const wx = lx + cx, wz = lz + cz;
           if (inCover(isl._wood, wx, wz)) cover = 1;
           else if (inCover(isl._heath, wx, wz)) cover = 2;
@@ -587,6 +608,10 @@ export function buildArchipelago(scene, env, mapData, realData) {
           // mapped scrub: continuous grey-green juniper carpet
           hc.copy(COL.scrubG).lerp(COL.juniper, THREE.MathUtils.smoothstep(bloom, 0.35, 0.75) * 0.5);
           tmp.lerp(hc, (0.5 + patch * 0.25) * THREE.MathUtils.smoothstep(slope, 0.55, 0.8));
+        } else if (cover === 4) {
+          // photo field: open dry Nordic meadow
+          hc.copy(COL.field).lerp(COL.heathG, THREE.MathUtils.smoothstep(bloom, 0.45, 0.85) * 0.4);
+          tmp.lerp(hc, (0.6 + patch * 0.25) * THREE.MathUtils.smoothstep(slope, 0.5, 0.75));
         } else {
           // heather + juniper heath carpets the flatter ground — the Jurmo signature.
           // Where OSM maps real heath, the carpet is near-total instead of a heuristic.
@@ -612,10 +637,15 @@ export function buildArchipelago(scene, env, mapData, realData) {
 
     // ONLY proper forested islands carry trees. Small skerries are bare granite
     // with at most a little juniper scrub — never trees (that's the un-Finnish tell).
+    // When the island has a SATELLITE cover grid, the photo decides instead:
+    // trees exactly where the imagery shows canopy, nothing where it shows
+    // field or bare rock.
     const hasWood = isl._wood && isl._wood.length > 0;
     const hasHeath = isl._heath && isl._heath.length > 0;
-    if (kind === 'forest' || hasWood) {
-      const target = Math.min(Math.floor(isl.A * 0.004) + (hasWood ? 200 : 0), 800, treeBudget);
+    const satGrid = !!(isl.cover && isl.cover.b64);
+    const satForest = satGrid || (isl.cover && isl.cover.d === 1);
+    if (isl.cover ? satForest : (kind === 'forest' || hasWood)) {
+      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.005 : 0.004)) + (satGrid || hasWood ? 220 : 0), 900, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -623,7 +653,9 @@ export function buildArchipelago(scene, env, mapData, realData) {
         const [lx, lz] = samp();
         const y = islandHeight(lx, lz, isl);
         if (y < 0.9 || y > H + 1.0) continue;
-        if (hasWood) {                             // the REAL forest boundary decides
+        if (satGrid) {                             // the PHOTO decides
+          if (coverAt(isl, lx, lz) !== 1) continue;
+        } else if (hasWood) {                      // else the OSM forest boundary
           if (!inCover(isl._wood, cx + lx, cz + lz)) continue;
         } else if (hasHeath) {
           if (inCover(isl._heath, cx + lx, cz + lz)) continue; // mapped heath stays treeless
@@ -644,7 +676,8 @@ export function buildArchipelago(scene, env, mapData, realData) {
       }
     }
 
-    // low juniper + heather scrub — the heath that carpets these islands
+    // low juniper + heather scrub — the heath that carpets these islands.
+    // With a satellite grid: juniper keeps off the photo's forests and fields.
     const jtarget = Math.min(Math.floor(isl.A * (kind === 'bald' ? 0.011 : kind === 'sparse' ? 0.02 : 0.008)), 240);
     let jp = 0, jt = 0;
     while (jp < jtarget && jt < jtarget * 8) {
@@ -652,6 +685,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
       if (y < 0.3 || y > H + 0.4) continue;
+      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl === 1 || cl === 2) continue; }
       const sc = 0.7 + treeRng() * 1.1;
       _p.set(cx + lx, y - 0.06, cz + lz);
       _s.set(sc, sc * (0.7 + treeRng() * 0.5), sc);
@@ -661,7 +695,8 @@ export function buildArchipelago(scene, env, mapData, realData) {
       jp++;
     }
 
-    // scattered moraine boulders (Jurmo's "stone kingdom") on the bare rocks
+    // scattered moraine boulders (Jurmo's "stone kingdom") on the bare rocks —
+    // with a satellite grid they cluster where the photo shows bare ground
     const btarget = Math.min(Math.floor(isl.A * (kind === 'forest' ? 0.003 : 0.008)), 160);
     let bp = 0, bt = 0;
     while (bp < btarget && bt < btarget * 8) {
@@ -669,6 +704,7 @@ export function buildArchipelago(scene, env, mapData, realData) {
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
       if (y < 0.15 || y > H + 0.3) continue;
+      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl !== 3 && cl !== 4 && treeRng() < 0.75) continue; }
       const sc = 0.5 + treeRng() * 1.6;
       _p.set(cx + lx, y - 0.1, cz + lz);
       _s.set(sc * (0.8 + treeRng() * 0.5), sc * (0.6 + treeRng() * 0.4), sc * (0.8 + treeRng() * 0.5));

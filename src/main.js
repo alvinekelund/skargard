@@ -43,7 +43,10 @@ const env = createEnvironment(scene, renderer);
 const mapData = await (await fetch(import.meta.env.BASE_URL + 'archipelago_map.json')).json();
 // real buildings, piers, charted seamarks and land cover (OSM)
 const realData = await (await fetch(import.meta.env.BASE_URL + 'archipelago_data.json')).json();
-const archipelago = buildArchipelago(scene, env, mapData, realData);
+// satellite-classified land cover (forest/field/rock/heath per island) — optional
+const coverData = await fetch(import.meta.env.BASE_URL + 'archipelago_cover.json')
+  .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const archipelago = buildArchipelago(scene, env, mapData, realData, coverData);
 const boat = createBoat(scene);
 
 // spawn in open water off Utö, bow pointed toward Jurmo, and stream that region in

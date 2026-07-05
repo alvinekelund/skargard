@@ -68,15 +68,20 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
 - **7,326 building footprints** (position, size, orientation, class), **1,094
   piers**, **760 charted seamarks** with correct IALA types (lateral, all four
   cardinals, lights) — OSM.
-- **1,812 land-cover polygons** (wood / heath / scrub) — OSM. They decide both the
-  ground colour (forest floor, heather carpet, juniper) and where trees may grow;
-  mapped heath such as Jurmo stays treeless because the data says so.
+- **Satellite-classified land cover** — the same Esri aerial imagery the terrain
+  wears is classified per ~12 m pixel into forest / field / bare rock / heath
+  ([`tools/bake_landcover.py`](tools/bake_landcover.py), 1,511 islands, calibrated
+  so Jurmo comes out moraine heath and Nötö 58% forest). **Trees grow exactly
+  where the photo shows canopy**, boulders cluster on its bare rock, fields stay
+  open — and with the imagery toggled off, the ground colours follow the same
+  classes. OSM's 1,812 wood/heath/scrub polygons remain the fallback for islands
+  below the classifier's size threshold.
 
 **Still procedural** (honestly): the height *profile* between shore and peak on
 islands without a relief grid, everything below the waterline (bathymetry), the
-rock texture, tree/boulder models and their placement *inside* the real polygons,
+rock texture, the tree/boulder *models* (their placement now follows the photo),
 and the water, waves and weather. The next accuracy step would be the NLS 2 m
-laser DEM and orthophoto-derived ground masks — deliberately not faked here.
+laser DEM — deliberately not faked here.
 
 ## How it's made
 
