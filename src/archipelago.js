@@ -316,7 +316,11 @@ function islandHeight(lx, lz, isl) {
   const cx = isl.x, cz = isl.z;
   let h;
   if (isl.grid) {
-    const shore = THREE.MathUtils.smoothstep(s, 0, 15);    // DEM bleeds at 25 m — pin the coast
+    // the shore rise scales with the island's height: a 58 m island climbs
+    // over ~130 m like a real glaciated whaleback — NOT within 15 m like a
+    // mesa with cliff walls (which is what this used to draw)
+    const rise = THREE.MathUtils.clamp(isl.H * 5, 18, 130);
+    const shore = THREE.MathUtils.smoothstep(s, 0, rise);
     h = Math.max(gridH(isl.grid, lx, lz) * shore, dome * 0.9); // land stays above water
   } else {
     h = dome * isl.H;
@@ -447,6 +451,12 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             vec3 sat = texture2D(uSat, suv).rgb;
             sat = pow(sat * 1.5, vec3(0.92));              // lift the aerial exposure so it reads at dusk too
             float land = smoothstep(0.1, 0.55, vWPos.y);  // keep the wet granite only at the very shore
+            // tiny skerries are sub-pixel in the photo, so their pixel is SEA —
+            // dark blue-green paint made them look like teal pillows. Reject
+            // water-looking pixels and let the granite show instead.
+            float luma = dot(sat, vec3(0.299, 0.587, 0.114));
+            float waterLike = (1.0 - smoothstep(0.16, 0.30, luma)) * step(sat.r, sat.b * 1.25);
+            land *= 1.0 - waterLike;
             diffuseColor.rgb = mix(diffuseColor.rgb, sat, land * uSatOn);
           }
         }`)
@@ -526,7 +536,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     islands.push({
       x: cx, z: cz, ring, bbox: { minX, minZ, maxX, maxZ },
       A, R: Math.sqrt(A / Math.PI), H,
-      S: THREE.MathUtils.clamp(Math.sqrt(A) * 0.14, 4, 30),
+      // rise length grows with real height too — tall islands must not jump
+      // straight from the water (S is the whaleback's shore-to-crown distance)
+      S: THREE.MathUtils.clamp(Math.max(Math.sqrt(A) * 0.14, (e > 0 ? e : 0) * 4.5), 4, 130),
       kind, name: rec.n || null,
       realElev: e > 0, grid: rec.g || null,
       cover: coverIslands ? coverIslands[String(recIndex)] || null : null,   // satellite-classified land cover
