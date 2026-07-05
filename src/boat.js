@@ -72,6 +72,9 @@ export function createBoat(scene) {
     const o = swan.getObjectByName(name);
     if (o) { o.parent.remove(o); o.position.x -= MAST_X; sailPivot.add(o); }
   }
+  // the genoa sets on the LEEWARD side and blows across in every tack/gybe —
+  // its belly is built bulging +z, so mirroring scale.z flips the set
+  const genoa = swan.getObjectByName('genoa');
 
   group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   // interior + rope shadow flags were set deliberately — re-assert after the blanket pass
@@ -277,13 +280,26 @@ export function createBoat(scene) {
     }
     sailPivot.rotation.y += state.flap * 0.03 * Math.sin(t * 26);  // whole-rig tremble
 
+    // the genoa tacks too: mirror its belly to leeward — a controlled sweep
+    // through a tack, a fast blow-across in a gybe, trembling flat when luffing
+    if (genoa) {
+      const jibTarget = -side;
+      const k = state.boomSwing && state.boomSwing.type === 'gybe' ? 14 : 4.5;
+      let jz = genoa.scale.z + (jibTarget - genoa.scale.z) * (1 - Math.exp(-k * dt));
+      if (Math.abs(jz) < 0.06) jz = Math.sign(jibTarget) * 0.06;   // never fully degenerate
+      genoa.scale.z = jz;
+    }
+
     // drive the sail flutter shader
     sailUniforms.uTime.value = t;
     sailUniforms.uFlap.value = Math.max(state.flap, 0.08 * (ctx.gust || 0));
 
-    // live rigging: hangs toward the true horizon, swaps sides with the tack
+    // live rigging: hangs toward the true horizon, swaps sides with the tack.
+    // The mainsheet goes TIGHT when the sail is drawing — slack only when
+    // luffing, motoring, or while the boom is running across.
     group.updateMatrixWorld();
-    ropes.update(dt, { gust: ctx.gust || 0, flap: state.flap, side: state.side, t });
+    const sheetLoaded = !state.motorOn && state.flap < 0.18 && eff > 0.25 && !state.boomSwing;
+    ropes.update(dt, { gust: ctx.gust || 0, flap: state.flap, side: state.side, t, loaded: sheetLoaded });
 
     wake.update(state, fwd, t, wAt);
 

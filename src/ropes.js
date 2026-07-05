@@ -114,7 +114,11 @@ export function createRopes(swan, sailPivot) {
     const jitter = 0.6 * (ctx.gust || 0) + 2.2 * (ctx.flap || 0);
     const t = ctx.t || 0;
 
-    // boom end in swan-local: rotate by the trim pivot, then offset to the mast
+    // boom end in swan-local: rotate by the trim pivot, then offset to the mast.
+    // The mainsheet is TIGHT while the sail is drawing and loading the boom —
+    // it only hangs slack when luffing, motoring, or while the boom runs across.
+    const mainTarget = ctx.loaded ? 1.004 : 1.09;
+    main.slack += (mainTarget - main.slack) * (1 - Math.exp(-5 * dt));
     _a.copy(BOOM_END).applyAxisAngle(UP, sailPivot.rotation.y).add(sailPivot.position);
     main.step(_a, TRAV, _g, jitter, t);
 
