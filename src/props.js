@@ -100,7 +100,7 @@ function motorboat(rng) {
 // a small figure (~1.75 m) with real limbs: separate legs and arms pivoted at
 // hip and shoulder so the walk cycle can swing them, shoes, hands, a wool
 // beanie — a person, not a bollard. facing +Z.
-function person(rng) {
+function person(rng, seated = false) {
   const g = new THREE.Group();
   const jacket = new THREE.MeshStandardMaterial({
     color: [0xc8452c, 0x2d5b8e, 0xd9b23a, 0x3c6e46, 0xe8e2d4][Math.floor(rng() * 5)], roughness: 0.85,
@@ -137,6 +137,11 @@ function person(rng) {
   g.add(legL, legR, armL, armR, torso, hips, head, beanie);
   g.scale.setScalar(0.92 + rng() * 0.16);          // people come in sizes
   g.userData.limbs = { legL, legR, armL, armR };
+  if (seated) {                                    // sitting: legs forward, hands to the helm
+    legL.rotation.x = -1.45; legR.rotation.x = -1.38;
+    armL.rotation.x = -0.85; armR.rotation.x = -0.8;
+    g.userData.seated = true;
+  }
   return g;
 }
 
@@ -419,6 +424,14 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
       const r = rng();
       const b = r < 0.5 ? smallSailboat(rng) : r < 0.8 ? motorboat(rng) : rowboat(rng);
+      if (rng() < 0.22) {                          // someone sitting aboard, pottering
+        const sitter = person(rng, true);
+        if (r < 0.5) sitter.position.set(0, -0.31, -1.15);        // yacht: in the cockpit
+        else if (r < 0.8) sitter.position.set(0, -0.16, -0.72);   // motorboat: helm bench
+        else sitter.position.set(0, -0.46, -0.45);                // skiff: on the thwart
+        sitter.rotation.y = rng() < 0.7 ? 0 : Math.PI;
+        b.add(sitter);
+      }
       b.position.set(bx, 0, bz);
       b.rotation.y = Math.atan2(dx, dz) + (rng() - 0.5) * 0.35;   // roughly along the pier
       group.add(b);
@@ -445,12 +458,16 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     walkers++;
   }
 
-  // ── a few small boats puttering around the region's open water ──
+  // ── a few small boats puttering around the region's open water —
+  //    each with someone actually at the helm ──
   for (let n = 0; n < 3; n++) {
     const ang = rng() * Math.PI * 2, dist = 250 + rng() * 650;
     const x = center.x + Math.sin(ang) * dist, z = center.y + Math.cos(ang) * dist;
     if (heightAt(x, z) > -2) continue;
     const b = motorboat(rng);
+    const driver = person(rng, true);
+    driver.position.set(0, -0.14, -0.72);          // hips on the helm bench, hands to the wheel
+    b.add(driver);
     b.position.set(x, 0, z);
     b.userData = { heading: rng() * Math.PI * 2, speed: 2.4 + rng() * 3.2, turn: 0, side: rng() < 0.5 ? 1 : -1, phase: rng() * 6.28 };
     b.rotation.y = b.userData.heading;

@@ -46,7 +46,7 @@ export function createHUD() {
   muteBtn.textContent = '🔇';
   muteBtn.title = 'turn sound on';
   muteBtn.style.cssText = [
-    'position:fixed', 'left:16px', 'bottom:16px', 'width:38px', 'height:38px',
+    'position:fixed', 'left:34px', 'top:108px', 'width:38px', 'height:38px',   // below the title, clear of the HUD
     'border-radius:50%', 'border:1px solid rgba(255,255,255,0.22)',
     'background:rgba(10,16,24,0.45)', 'color:#fff', 'font-size:16px',
     'cursor:pointer', 'z-index:25', 'backdrop-filter:blur(2px)',

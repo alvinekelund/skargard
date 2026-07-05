@@ -187,11 +187,22 @@ export function createBoat(scene) {
 
     // heel: 2nd-order spring — a gust leans her over a beat later, then settles.
     // wind² in the target makes gusts read; turn lean couples yaw into roll.
+    // The target is CLAMPED to heelMax (gusts push windSpeed² toward 2, which
+    // used to ask for ~47° and put half the boat under), and the integrated
+    // heel gets a hard stop just past it — hull form stiffens as the rail
+    // nears the water, so she never buries.
     const heelDir = -Math.sign(rel || 1);
-    const heelTarget = heelDir * CFG.heelMax * eff * (windSpeed * windSpeed) *
-      THREE.MathUtils.clamp(0.3 + state.speed / CFG.heelSpeedRef, 0, 1);
+    const heelTarget = THREE.MathUtils.clamp(
+      heelDir * CFG.heelMax * eff * (windSpeed * windSpeed) *
+        THREE.MathUtils.clamp(0.3 + state.speed / CFG.heelSpeedRef, 0, 1),
+      -CFG.heelMax, CFG.heelMax);
     state.heelVel += (CFG.heelStiffness * (heelTarget - state.heel) - CFG.heelDamping * state.heelVel) * dt;
     state.heel += state.heelVel * dt;
+    const heelStop = CFG.heelMax * 1.12;             // ~27° absolute limit incl. overshoot
+    if (Math.abs(state.heel) > heelStop) {
+      state.heel = Math.sign(state.heel) * heelStop;
+      if (Math.sign(state.heelVel) === Math.sign(state.heel)) state.heelVel *= 0.3;
+    }
 
     // buoyancy: long-baseline sampling low-passes the chop (a 36-footer doesn't
     // bounce on 6 m wavelets); 2nd-order springs give one gentle overshoot
