@@ -41,10 +41,10 @@ export function createHUD() {
   ].join(';');
   document.body.appendChild(attrib);
 
-  // ── mute button ──
+  // ── sound button — the game starts MUTED, sound is opt-in ──
   const muteBtn = document.createElement('button');
-  muteBtn.textContent = '🔊';
-  muteBtn.title = 'mute sound';
+  muteBtn.textContent = '🔇';
+  muteBtn.title = 'turn sound on';
   muteBtn.style.cssText = [
     'position:fixed', 'left:16px', 'bottom:16px', 'width:38px', 'height:38px',
     'border-radius:50%', 'border:1px solid rgba(255,255,255,0.22)',

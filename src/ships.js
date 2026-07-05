@@ -111,38 +111,68 @@ function cruiseFerry(scheme) {
   return g;
 }
 
-// a yellow double-ended road ferry (lossi): flat car deck, ramps both ends
+// a yellow double-ended road ferry (lossi): shaped symmetric hull, tire
+// fenders, railed car deck, lifting ramp gantries, offset wheelhouse
 function roadFerry() {
   const g = new THREE.Group();
   const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c218, roughness: 0.6 });
   const white = new THREE.MeshStandardMaterial({ color: 0xf0f0ea, roughness: 0.55 });
-  g.add(box(48, 2.6, 12, 0, 1.3, 0, yellow));
-  g.add(box(46, 1.4, 0.5, 0, 3.3, 5.8, yellow));    // bulwarks
-  g.add(box(46, 1.4, 0.5, 0, 3.3, -5.8, yellow));
-  for (const s of [1, -1]) {                        // raised ramps
-    const ramp = box(6, 0.4, 10.5, s * 26, 3.6, 0, yellow);
-    ramp.rotation.z = s * 0.5;
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.9 });
+  const hull = shipBlock(50, 12.5, 4.2, yellow, 0.1, 0.42);   // rounded both ends
+  hull.position.y = -1.4;
+  g.add(hull);
+  g.add(box(44, 1.3, 0.45, 0, 3.4, 5.9, yellow));             // bulwarks
+  g.add(box(44, 1.3, 0.45, 0, 3.4, -5.9, yellow));
+  for (const s of [1, -1]) {
+    for (let k = 0; k < 6; k++) {                             // tire fenders
+      const tyre = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.22, 6, 10), dark);
+      tyre.position.set(-17.5 + k * 7, 1.5, s * 6.35);
+      g.add(tyre);
+    }
+    const ramp = box(6, 0.4, 10.5, s * 26, 3.8, 0, yellow);   // raised ramps
+    ramp.rotation.z = s * 0.55;
     g.add(ramp);
+    const gantry = box(0.5, 6, 0.5, s * 22.5, 5.5, 4.8, yellow);   // lifting gantries
+    const gantry2 = box(0.5, 6, 0.5, s * 22.5, 5.5, -4.8, yellow);
+    const beam = box(0.5, 0.5, 10.1, s * 22.5, 8.3, 0, yellow);
+    g.add(gantry, gantry2, beam);
   }
-  const house = box(4.5, 3.6, 3.6, 3, 5.6, 4.0, white);   // offset wheelhouse
+  const house = box(4.5, 3.4, 3.6, 3, 6, 4.2, white);         // offset wheelhouse on legs
   g.add(house);
-  windows(4, 6.4, 5.9, g, 0.8);
+  g.add(box(0.35, 2.2, 0.35, 1.5, 3.6, 3.2, white), box(0.35, 2.2, 0.35, 4.5, 3.6, 5.2, white));
+  windows(4, 6.9, 6.05, g, 0.8);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 3.4, 6), white);
+  mast.position.set(3, 9.2, 4.2); g.add(mast);
   return g;
 }
 
-// the small yellow archipelago connection vessel (the Utö line)
+// the small yellow archipelago connection vessel (the Utö line): shaped hull,
+// boot stripe, railed foredeck, proper deckhouse + bridge, mast and radar
 function connectionVessel() {
   const g = new THREE.Group();
   const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b414, roughness: 0.6 });
   const white = new THREE.MeshStandardMaterial({ color: 0xf0efe8, roughness: 0.5 });
-  g.add(box(26, 3.2, 7, 0, 1.6, 0, yellow));
-  const bow = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 3.5, 6, 4), yellow);
-  bow.rotation.z = -Math.PI / 2; bow.rotation.y = Math.PI / 4;
-  bow.position.set(15.5, 1.6, 0);
-  g.add(bow);
-  g.add(box(12, 3, 5.4, -1, 4.7, 0, white));
-  g.add(box(5, 2.4, 4.6, 2, 7.2, 0, white));
-  windows(10, 4.9, 2.8, g, 0.8); windows(10, 4.9, -2.8, g, 0.8);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x16191f, roughness: 0.6 });
+  const hull = shipBlock(27, 7.2, 4.6, yellow, 0.22, 0.2);
+  hull.position.y = -1.6;
+  g.add(hull);
+  const boot = shipBlock(27.1, 7.4, 0.5, dark, 0.22, 0.2);    // waterline stripe
+  boot.position.y = 0.1;
+  g.add(boot);
+  g.add(box(11, 2.8, 5.2, -2, 4.4, 0, white));                // deckhouse
+  g.add(box(5, 2.2, 4.4, 1.5, 6.9, 0, white));                // bridge
+  windows(9, 4.7, 2.7, g, 0.7); windows(9, 4.7, -2.7, g, 0.7);
+  windows(4, 7.4, 2.3, g, 0.7); windows(4, 7.4, -2.3, g, 0.7);
+  for (const s of [1, -1]) {                                  // foredeck rails
+    const rail = box(9, 0.06, 0.06, 8, 4.0, s * 3.1, white);
+    rail.rotation.z = -0.03;
+    g.add(rail);
+    for (let k = 0; k < 4; k++) g.add(box(0.06, 1.0, 0.06, 4.5 + k * 2.6, 3.5, s * 3.1, white));
+  }
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 3.2, 6), white);
+  mast.position.set(3.5, 9.5, 0); g.add(mast);
+  const radar = box(1.2, 0.22, 0.3, 3.5, 8.7, 0, dark);
+  g.add(radar);
   return g;
 }
 

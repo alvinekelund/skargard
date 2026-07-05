@@ -1,9 +1,10 @@
 /* Ambience: a real sailing-boat recording (freesound community, CC0), looped
    through WebAudio with a gentle speed-reactive lift and a mute toggle.
-   Must be started from a user gesture (autoplay policy). */
+   Must be started from a user gesture (autoplay policy).
+   SOUND IS OPT-IN: starts muted; the 🔇 button turns it on. */
 
 export function createAudio() {
-  let ctx = null, started = false, muted = false;
+  let ctx = null, started = false, muted = true;
   let master = null, speedGain = null;
 
   async function start() {

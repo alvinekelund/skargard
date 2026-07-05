@@ -45,12 +45,25 @@ function sparBuoy(green) {
   return g;
 }
 
+// a wooden skiff (~3.5 m): shaped hull, dark interior well, two thwarts,
+// gunwale rails — not just a floating capsule. bow at +Z.
 function rowboat(rng) {
   const g = new THREE.Group();
-  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 2.6, 3, 7), rng() < 0.5 ? M.hullWhite : M.falunRed);
-  hull.scale.set(1, 0.42, 1);
-  hull.rotation.x = Math.PI / 2; hull.rotation.z = Math.PI / 2;
-  hull.position.y = 0.16; g.add(hull);
+  const hullMat = rng() < 0.5 ? M.hullWhite : M.falunRed;
+  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 2.4, 4, 9), hullMat);
+  hull.rotation.x = Math.PI / 2;
+  hull.scale.set(0.82, 1, 0.55);                // beam, length, draft
+  hull.position.y = 0.2; g.add(hull);
+  const well = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.16, 1.9), M.woodDark);
+  well.position.y = 0.3; g.add(well);           // open interior
+  for (const tz of [0.55, -0.45]) {             // rowing thwarts
+    const thwart = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.045, 0.22), M.plank);
+    thwart.position.set(0, 0.36, tz); g.add(thwart);
+  }
+  for (const s of [1, -1]) {                    // gunwale rails
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 2.15), M.wood);
+    rail.position.set(0.33 * s, 0.42, 0); g.add(rail);
+  }
   return g;
 }
 
@@ -69,24 +82,61 @@ function motorboat(rng) {
   cons.position.set(0, 0.72, 0.2); g.add(cons);                    // console
   const ws = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 0.04), M.glass);
   ws.position.set(0, 1.0, -0.02); ws.rotation.x = 0.35; g.add(ws); // raked windscreen
-  const ob = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.72, 0.34), M.steel);
-  ob.position.set(0, 0.32, -1.9); g.add(ob);                       // outboard at the transom
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.24, 0.5), M.plank);
+  seat.position.set(0, 0.56, -0.85); g.add(seat);                  // helm bench
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.018, 6, 12), M.steel);
+  wheel.position.set(0, 0.92, 0.52); wheel.rotation.x = 0.5; g.add(wheel);
+  const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.42), M.navy);
+  cowl.position.set(0, 0.66, -1.86); g.add(cowl);                  // outboard cowl
+  const obLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.6, 6), M.steel);
+  obLeg.position.set(0, 0.2, -1.88); g.add(obLeg);
+  for (const s of [1, -1]) {                                       // rub rails
+    const rub = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 3.2), M.woodDark);
+    rub.position.set(0.66 * s, 0.55, -0.1); g.add(rub);
+  }
   return g;
 }
 
-// a small figure (~1.75 m): trousers, bright jacket, head — reads at dock distance
+// a small figure (~1.75 m) with real limbs: separate legs and arms pivoted at
+// hip and shoulder so the walk cycle can swing them, shoes, hands, a wool
+// beanie — a person, not a bollard. facing +Z.
 function person(rng) {
   const g = new THREE.Group();
   const jacket = new THREE.MeshStandardMaterial({
-    color: [0xc8452c, 0x2d5b8e, 0xd9b23a, 0x3c6e46, 0xe8e2d4][Math.floor(rng() * 5)], roughness: 0.9,
+    color: [0xc8452c, 0x2d5b8e, 0xd9b23a, 0x3c6e46, 0xe8e2d4][Math.floor(rng() * 5)], roughness: 0.85,
   });
-  const legs = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.8, 6), M.woodDark);
-  legs.position.y = 0.4; g.add(legs);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.45, 3, 8), jacket);
-  torso.position.y = 1.12; g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6),
-    new THREE.MeshStandardMaterial({ color: 0xd9a97e, roughness: 0.8 }));
-  head.position.y = 1.62; g.add(head);
+  const trouser = new THREE.MeshStandardMaterial({ color: rng() < 0.5 ? 0x2b2e33 : 0x4a4238, roughness: 0.95 });
+  const skin = new THREE.MeshStandardMaterial({ color: [0xd9a97e, 0xc9906a, 0xe8c39a][Math.floor(rng() * 3)], roughness: 0.8 });
+  const mkLeg = (s) => {
+    const p = new THREE.Group(); p.position.set(0.09 * s, 0.86, 0);
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.66, 3, 6), trouser);
+    leg.position.y = -0.42; p.add(leg);
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.23), M.woodDark);
+    shoe.position.set(0, -0.82, 0.045); p.add(shoe);
+    return p;
+  };
+  const mkArm = (s) => {
+    const p = new THREE.Group(); p.position.set(0.235 * s, 1.36, 0);
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.5, 3, 6), jacket);
+    arm.position.y = -0.29; p.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.048, 6, 5), skin);
+    hand.position.y = -0.58; p.add(hand);
+    return p;
+  };
+  const legL = mkLeg(1), legR = mkLeg(-1), armL = mkArm(1), armR = mkArm(-1);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.4, 4, 8), jacket);
+  torso.position.y = 1.16; torso.scale.z = 0.72;
+  const hips = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.125, 0.16, 8), trouser);
+  hips.position.y = 0.9;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), skin);
+  head.position.y = 1.63;
+  const beanie = new THREE.Mesh(
+    new THREE.SphereGeometry(0.105, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    new THREE.MeshStandardMaterial({ color: [0xb33a2f, 0x30507c, 0x777268, 0xc7a53b][Math.floor(rng() * 4)], roughness: 1 }));
+  beanie.position.y = 1.665;
+  g.add(legL, legR, armL, armR, torso, hips, head, beanie);
+  g.scale.setScalar(0.92 + rng() * 0.16);          // people come in sizes
+  g.userData.limbs = { legL, legR, armL, armR };
   return g;
 }
 
@@ -100,12 +150,39 @@ function smallSailboat(rng) {
   hull.rotation.x = Math.PI / 2; hull.position.y = 0.34; g.add(hull);
   const deck = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.06, 3.6), M.wood);
   deck.position.set(0, 0.55, -0.2); g.add(deck);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 1.5), M.white);
-  cabin.position.set(0, 0.74, 0.5); g.add(cabin);
+  // low trunk with a rounded top face and dark window strips
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.3, 1.5), M.white);
+  cabin.position.set(0, 0.7, 0.5); g.add(cabin);
+  const cabinTop = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 1.28), M.white);
+  cabinTop.position.set(0, 0.9, 0.5); g.add(cabinTop);
+  for (const s of [1, -1]) {
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 1.05), M.glass);
+    win.position.set(0.39 * s, 0.76, 0.5); g.add(win);
+    const toe = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 3.5), M.wood);
+    toe.position.set(0.39 * s, 0.585, -0.2); g.add(toe);           // toerail
+  }
+  const well = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.14, 0.95), M.woodDark);
+  well.position.set(0, 0.53, -1.15); g.add(well);                  // cockpit
+  const tiller = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.7, 5), M.wood);
+  tiller.rotation.x = Math.PI / 2 - 0.25; tiller.position.set(0, 0.66, -1.5); g.add(tiller);
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 7.2, 6), M.steel);
   mast.position.set(0, 4.1, 0.1); g.add(mast);
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 2.6, 6), M.sail);  // furled main
-  boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.05, -1.0); g.add(boom);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.6, 6), M.sail);
+  boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.15, -1.0); g.add(boom);   // furled main
+  // standing rigging — the wires make her read as a yacht at any distance
+  const wire = (x1, y1, z1, x2, y2, z2) => {
+    const a = new THREE.Vector3(x1, y1, z1), b = new THREE.Vector3(x2, y2, z2);
+    const d = b.clone().sub(a);
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, d.length(), 4), M.steel);
+    w.position.copy(a).addScaledVector(d, 0.5);
+    w.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    g.add(w);
+  };
+  wire(0, 7.6, 0.1, 0, 0.6, 2.05);                                 // forestay
+  wire(0, 7.6, 0.1, 0, 0.55, -2.1);                                // backstay
+  wire(0, 7.4, 0.1, 0.6, 0.6, 0.1); wire(0, 7.4, 0.1, -0.6, 0.6, 0.1);  // shrouds
+  const pulpit = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.015, 5, 10, Math.PI), M.steel);
+  pulpit.position.set(0, 0.72, 1.95); pulpit.rotation.y = Math.PI / 2; g.add(pulpit);
   return g;
 }
 
@@ -361,8 +438,8 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     if (L < 8) continue;
     const isQuay = L > 42;
     const p = person(rng);
-    p.userData = { ax, az, bx: bx2, bz: bz2, t: rng(), dir: rng() < 0.5 ? 1 : -1,
-                   speed: (0.55 + rng() * 0.35) / L, deckY: isQuay ? 1.1 : 0.58 };
+    Object.assign(p.userData, { ax, az, bx: bx2, bz: bz2, t: rng(), dir: rng() < 0.5 ? 1 : -1,
+                   speed: (0.55 + rng() * 0.35) / L, deckY: isQuay ? 1.1 : 0.58, phase: rng() * 6 });
     group.add(p);
     dyn.walkers.push(p);
     walkers++;
@@ -424,8 +501,15 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       if (u.t > 1) { u.t = 1; u.dir = -1; }
       if (u.t < 0) { u.t = 0; u.dir = 1; }
       const x = u.ax + (u.bx - u.ax) * u.t, z = u.az + (u.bz - u.az) * u.t;
-      p.position.set(x, u.deckY + Math.abs(Math.sin(t * 4.2 + u.ax)) * 0.03, z);   // step bob
+      const step = t * 4.6 + (u.phase || 0);
+      p.position.set(x, u.deckY + Math.abs(Math.sin(step)) * 0.025, z);            // step bob
       p.rotation.y = Math.atan2((u.bx - u.ax) * u.dir, (u.bz - u.az) * u.dir);
+      const L2 = u.limbs;                            // the walk cycle: legs swing, arms counter
+      if (L2) {
+        const sw = Math.sin(step) * 0.5;
+        L2.legL.rotation.x = sw;  L2.legR.rotation.x = -sw;
+        L2.armL.rotation.x = -sw * 0.65; L2.armR.rotation.x = sw * 0.65;
+      }
     }
   }
 
