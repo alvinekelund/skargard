@@ -169,6 +169,10 @@ export function buildSwan36({ withSails = true } = {}) {
       pos.push(c.x, c.y, c.z);
       const base = (rings.length - 1) * rows;
       for (let j = 0; j < rows - 1; j++) idx.push(ci, base + j, base + j + 1);
+      // close the chord between the ring's two ends — the transom ring is an
+      // OPEN arc (sheer→keel→sheer), and without this triangle the whole top
+      // of the transom is a hole (degenerate & harmless on closed foil rings)
+      idx.push(ci, base + rows - 1, base);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
