@@ -60,11 +60,13 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
   network at runtime; imagery © Esri, Maxar, Earthstar Geographics.
 - **7,462 island outlines** with names — OSM coastline polygons (© OpenStreetMap
   contributors, ODbL), 1:1 scale.
-- **Island heights** — Copernicus **EU-DEM (~25 m)** via the AWS Open Data terrain
-  tiles, baked per island by [`tools/bake_elevation.py`](tools/bake_elevation.py):
-  4,405 islands carry a real measured peak height, the 241 largest a coarse
-  interior relief grid (Jurmo's long moraine back, Utö's lighthouse hill). Only
-  tiny scalars live in git — no rasters.
+- **Island heights** — the **NLS Finland open DEM (10 m)** from Maanmittauslaitos
+  (CC BY 4.0, via the Paituli/Funet mirror), baked per island by
+  [`tools/bake_elevation_nls.py`](tools/bake_elevation_nls.py): **6,049 islands
+  (99.9 % of the land area) carry a real measured height**, 965 of them a bilinear
+  interior relief grid (Jurmo's long moraine back, Utö's lighthouse hill). The
+  procedural fallback is now only sub-resolution rocks — median 166 m². Only tiny
+  scalars live in git — no rasters.
 - **7,326 building footprints** (position, size, orientation, class), **1,094
   piers**, **760 charted seamarks** with correct IALA types (lateral, all four
   cardinals, lights) — OSM.
@@ -80,15 +82,14 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
 **Still procedural** (honestly): the height *profile* between shore and peak on
 islands without a relief grid, everything below the waterline (bathymetry), the
 rock texture, the tree/boulder *models* (their placement now follows the photo),
-and the water, waves and weather. The next accuracy step would be the NLS 2 m
-laser DEM — deliberately not faked here.
+and the water, waves and weather.
 
 ## How it's made
 
 One coherent light drives the whole scene; everything below shares it.
 
 - **The archipelago** is the heart of it: every island is its real OSM outline,
-  lifted by a distance-from-shore profile to its real EU-DEM height (or bilinearly
+  lifted by a distance-from-shore profile to its real NLS DEM height (or bilinearly
   through its real relief grid), so the islands are the low, glacier-smoothed
   granite whalebacks they actually are. Bare-rock skerries are carpeted in
   **heather heath and low horizontal juniper** (Jurmo) with scattered moraine
