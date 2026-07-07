@@ -387,6 +387,10 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       : r < 0.62 ? (rng2() < 0.3 ? C_DKRED : C_RED)
       : r < 0.74 ? C_YELL : r < 0.86 ? C_WHITE : C_GREY;
     const painted = wallC !== C_TAR && wallC !== C_GREY;
+    // trim (knuts, bargeboards, doors, frames) only on the nearest houses —
+    // the list is distance-sorted, and past ~500 m the boards are sub-pixel
+    // while their geometry count is what makes finalize hitch
+    const detailed = placed < 140;
     const roofC = cls === 2 ? C_ROOF : rng2() < 0.2 ? C_TILE : (rng2() < 0.5 ? C_ROOF : C_ROOF2);
     // ridge runs along the LONG axis of the real footprint
     const along = bw >= bd ? bw : bd, across = bw >= bd ? bd : bw;
@@ -398,7 +402,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, h, bd).translate(0, h / 2 + 0.24, 0), wallC)));
     // white corner boards (knutar) — THE tell of a Finnish timber house.
     // On painted walls only; bare tar/grey timber goes without.
-    if (painted && cls !== 2) {
+    if (detailed && painted && cls !== 2) {
       for (const sx of [1, -1]) for (const sz of [1, -1]) {
         bodyGeos.push(placeF(paintGeo(
           new THREE.BoxGeometry(0.17, h, 0.17).translate(sx * (bw / 2 - 0.03), h / 2 + 0.24, sz * (bd / 2 - 0.03)), C_TRIM)));
@@ -415,7 +419,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     roofGeo.rotateY(Math.PI / 2);                        // extrusion → along the ridge
     bodyGeos.push(place(paintGeo(roofGeo, roofC)));
     // white bargeboards up the gable rakes (vindskivor) on dwellings
-    if (cls === 0) {
+    if (detailed && cls === 0) {
       const slope = Math.hypot(rw / 2, roofH);
       for (const sx of [1, -1]) for (const sz of [1, -1]) {
         const vy = roofH / slope, vz = -sz * (rw / 2) / slope;
@@ -432,7 +436,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
     // door on a long wall, white-framed; a third of the dwellings get a
     // little porch roof over it (farstukvist)
-    if (cls !== 2) {
+    if (detailed && cls !== 2) {
       const ds = rng2() < 0.5 ? 1 : -1;
       const dx = (rng2() - 0.5) * along * 0.5;
       bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.95, 1.85, 0.08)
@@ -455,13 +459,13 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       for (let wj = 0; wj < nWin; wj++) {
         const wx = (wj - (nWin - 1) / 2) * (along / (nWin + 0.4));
         for (const s of [1, -1]) {
-          bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.74, 0.9, 0.05)
+          if (detailed) bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.74, 0.9, 0.05)
             .rotateY(Math.PI / 2).translate(wx, h * 0.55 + 0.24, s * (across / 2 + 0.015)), C_TRIM)));
           winGeos.push(place(new THREE.BoxGeometry(0.55, 0.7, 0.07)
             .rotateY(Math.PI / 2).translate(wx, h * 0.55 + 0.24, s * (across / 2 + 0.02))));
         }
       }
-      if (cls === 0 && roofH > 1.1) {
+      if (detailed && cls === 0 && roofH > 1.1) {
         for (const sx of [1, -1]) {
           bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.07, 0.62, 0.56)
             .translate(sx * (along / 2 + 0.015), h + roofH * 0.32 + 0.24, 0), C_TRIM)));
