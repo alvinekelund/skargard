@@ -1,22 +1,182 @@
-/* Ambience: calm and lovely — the sailing-boat recording (freesound, CC0)
-   warmed through a low-pass so the hiss is gone, kept quiet, breathing on a
-   slow swell, over a soft synthesized water-lap bed. Starts MUTED; the 🔇
-   button turns it on (autoplay policy also requires a user gesture). */
+/* Ambience: a warm day under sail, built from designed layers instead of a
+   filtered recording (the old mp3 through a 680 Hz low-pass read as a
+   "high-tech buzz" — all drone, no life). The picture painted in sound:
+
+     · water lapping the hull — irregular, gentle, stereo, the defining sound;
+       quickens and firms up a little as the boat gathers way
+     · a soft bed of moving water, breathing on a slow swell
+     · warm air — the faintest high, open hiss, so the scene isn't sealed shut
+     · bow-wash that rises with speed
+     · now and then, far off, a gull
+
+   Starts MUTED, always (the 🔇 button opts in; autoplay is never allowed).
+   The voice builders are exported so an OfflineAudioContext can render and
+   analyse the same recipe headlessly. */
+
+export function makeNoiseBuffer(ctx, seconds = 2, pink = false) {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  if (!pink) {
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  } else {
+    // Paul Kellet's economy pink filter — flat-ish tilt without brown mud
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let i = 0; i < len; i++) {
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99765 * b0 + w * 0.099046;
+      b1 = 0.963 * b1 + w * 0.2965164;
+      b2 = 0.57 * b2 + w * 1.0526913;
+      d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.28;
+    }
+  }
+  return buf;
+}
+
+// one lap of water against planking: a short shaped noise burst through a
+// band-pass, panned to a side of the hull
+export function splashVoice(ctx, dest, noiseBuf, t, o = {}) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  src.playbackRate.value = o.rate ?? 1;
+  src.loop = true;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = o.freq ?? 1200;
+  bp.Q.value = o.q ?? 1.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(o.peak ?? 0.16, t + (o.attack ?? 0.012));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + (o.attack ?? 0.012) + (o.decay ?? 0.32));
+  const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  src.connect(bp);
+  bp.connect(g);
+  if (pan) { pan.pan.value = o.pan ?? 0; g.connect(pan); pan.connect(dest); }
+  else g.connect(dest);
+  src.start(t);
+  src.stop(t + (o.attack ?? 0.012) + (o.decay ?? 0.32) + 0.05);
+  return src;
+}
+
+// a distant gull: pitch-bent saw through a low-pass, vibrato on the tail
+export function gullCry(ctx, dest, t, o = {}) {
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  const f0 = o.f0 ?? 1250, f1 = o.f1 ?? 820, dur = o.dur ?? 0.38;
+  osc.frequency.setValueAtTime(f0, t);
+  osc.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  const vib = ctx.createOscillator();
+  vib.frequency.value = 26;
+  const vibG = ctx.createGain();
+  vibG.gain.value = 22;
+  vib.connect(vibG); vibG.connect(osc.frequency);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 2100; lp.Q.value = 0.4;
+  const g = ctx.createGain();
+  const lvl = o.level ?? 0.035;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(lvl, t + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  osc.connect(lp); lp.connect(g);
+  if (pan) { pan.pan.value = o.pan ?? 0; g.connect(pan); pan.connect(dest); }
+  else g.connect(dest);
+  osc.start(t); osc.stop(t + dur + 0.02);
+  vib.start(t); vib.stop(t + dur + 0.02);
+}
+
+// the continuous layers (bed, air, bow-wash) — shared by live and offline use
+export function buildBeds(ctx, dest) {
+  const pinkBuf = makeNoiseBuffer(ctx, 2.5, true);
+  const whiteBuf = makeNoiseBuffer(ctx, 2, false);
+
+  // moving-water bed: pink noise banded mid, breathing on a slow swell
+  const bed = ctx.createBufferSource();
+  bed.buffer = pinkBuf; bed.loop = true;
+  const bedBp = ctx.createBiquadFilter();
+  bedBp.type = 'bandpass'; bedBp.frequency.value = 640; bedBp.Q.value = 0.45;
+  const bedG = ctx.createGain(); bedG.gain.value = 0.085;
+  bed.connect(bedBp); bedBp.connect(bedG); bedG.connect(dest);
+  const bedLfo = ctx.createOscillator(); bedLfo.frequency.value = 0.06;
+  const bedLfoG = ctx.createGain(); bedLfoG.gain.value = 0.018;
+  bedLfo.connect(bedLfoG); bedLfoG.connect(bedG.gain);
+  bed.start(); bedLfo.start();
+
+  // warm air: a whisper of open high, so the day sounds wide, not sealed
+  const air = ctx.createBufferSource();
+  air.buffer = whiteBuf; air.loop = true;
+  const airHp = ctx.createBiquadFilter();
+  airHp.type = 'highpass'; airHp.frequency.value = 1500; airHp.Q.value = 0.3;
+  const airG = ctx.createGain(); airG.gain.value = 0.022;
+  air.connect(airHp); airHp.connect(airG); airG.connect(dest);
+  const airLfo = ctx.createOscillator(); airLfo.frequency.value = 0.13;
+  const airLfoG = ctx.createGain(); airLfoG.gain.value = 0.006;
+  airLfo.connect(airLfoG); airLfoG.connect(airG.gain);
+  air.start(); airLfo.start();
+
+  // bow-wash: silent at rest, a steady rush as the boat gathers way
+  const wash = ctx.createBufferSource();
+  wash.buffer = whiteBuf; wash.loop = true;
+  const washBp = ctx.createBiquadFilter();
+  washBp.type = 'bandpass'; washBp.frequency.value = 950; washBp.Q.value = 0.8;
+  const washG = ctx.createGain(); washG.gain.value = 0;
+  wash.connect(washBp); washBp.connect(washG); washG.connect(dest);
+  wash.start();
+
+  return { whiteBuf, washGain: washG };
+}
 
 export function createAudio() {
   let ctx = null, started = false, muted = true;
-  let master = null, speedGain = null;
+  let master = null, washGain = null, whiteBuf = null;
+  let speedNorm = 0;                       // 0..1, from setSpeed
+  let lapTimer = null, gullTimer = null;
 
-  function brownNoise() {
-    const len = ctx.sampleRate * 2;
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    let last = 0;
-    for (let i = 0; i < len; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3.2; }
-    return buf;
+  function scheduleLap() {
+    // quicker, slightly firmer laps under way; lazy and soft at rest
+    const wait = (0.55 + Math.random() * 1.3) * (1 - speedNorm * 0.45);
+    lapTimer = setTimeout(() => {
+      if (ctx && !muted) {
+        const t = ctx.currentTime + 0.01;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const one = (tt, soft) => splashVoice(ctx, master, whiteBuf, tt, {
+          freq: 750 + Math.random() * 1500,
+          q: 1.0 + Math.random() * 1.2,
+          // the narrow band-pass eats most of the burst's broadband energy —
+          // the gain here compensates for that filter loss
+          peak: (0.7 + Math.random() * 0.9) * (0.55 + speedNorm * 0.45) * (soft ? 0.6 : 1),
+          attack: 0.006 + Math.random() * 0.016,
+          decay: 0.18 + Math.random() * 0.3,
+          pan: side * (0.25 + Math.random() * 0.4),
+          rate: 0.8 + Math.random() * 0.5,
+        });
+        one(t, false);
+        if (Math.random() < 0.35) one(t + 0.09 + Math.random() * 0.07, true);  // slap-slap
+      }
+      scheduleLap();
+    }, wait * 1000);
   }
 
-  async function start() {
+  function scheduleGull() {
+    gullTimer = setTimeout(() => {
+      if (ctx && !muted && Math.random() < 0.6) {
+        const cries = 1 + Math.floor(Math.random() * 3);
+        const pan = (Math.random() * 2 - 1) * 0.7;
+        const f0 = 1150 + Math.random() * 250;
+        for (let k = 0; k < cries; k++) {
+          gullCry(ctx, master, ctx.currentTime + 0.02 + k * (0.26 + Math.random() * 0.14), {
+            f0, f1: f0 * (0.62 + Math.random() * 0.1),
+            dur: 0.3 + Math.random() * 0.14,
+            level: 0.04 + Math.random() * 0.03,
+            pan,
+          });
+        }
+      }
+      scheduleGull();
+    }, (16 + Math.random() * 26) * 1000);
+  }
+
+  function start() {
     if (started) return; started = true;
     const AC = window.AudioContext || window.webkitAudioContext;
     ctx = new AC();
@@ -26,57 +186,26 @@ export function createAudio() {
     master.gain.value = 0;
     master.connect(ctx.destination);
 
-    speedGain = ctx.createGain();
-    speedGain.gain.value = 0.55;
-    speedGain.connect(master);
+    const beds = buildBeds(ctx, master);
+    washGain = beds.washGain;
+    whiteBuf = beds.whiteBuf;
 
-    try {
-      const buf = await (await fetch(import.meta.env.BASE_URL + 'sailing-ambience.mp3')).arrayBuffer();
-      const audio = await ctx.decodeAudioData(buf);
-      const src = ctx.createBufferSource();
-      src.buffer = audio;
-      src.loop = true;
-      src.loopStart = 0.5;
-      src.loopEnd = audio.duration - 0.5;
-      // warm it down: low-pass takes out the harsh wind hiss, leaves the water
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass'; lp.frequency.value = 680; lp.Q.value = 0.4;
-      const recGain = ctx.createGain(); recGain.gain.value = 0.62;
-      src.connect(lp); lp.connect(recGain); recGain.connect(speedGain);
-      // a slow swell so it breathes instead of droning
-      const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
-      const lfoG = ctx.createGain(); lfoG.gain.value = 0.12;
-      lfo.connect(lfoG); lfoG.connect(recGain.gain); lfo.start();
-      src.start();
-    } catch (e) {
-      console.warn('ambience failed to load', e);
-    }
+    scheduleLap();
+    scheduleGull();
 
-    // soft lapping bed under the recording — gentle, low, unhurried
-    const lapSrc = ctx.createBufferSource();
-    lapSrc.buffer = brownNoise(); lapSrc.loop = true;
-    const lapBp = ctx.createBiquadFilter();
-    lapBp.type = 'bandpass'; lapBp.frequency.value = 420; lapBp.Q.value = 0.6;
-    const lapGain = ctx.createGain(); lapGain.gain.value = 0.07;
-    lapSrc.connect(lapBp); lapBp.connect(lapGain); lapGain.connect(master);
-    const lapLfo = ctx.createOscillator(); lapLfo.frequency.value = 0.11;
-    const lapLfoG = ctx.createGain(); lapLfoG.gain.value = 0.045;
-    lapLfo.connect(lapLfoG); lapLfoG.connect(lapGain.gain);
-    lapLfo.start(); lapSrc.start();
-
-    if (!muted) master.gain.linearRampToValueAtTime(0.7, ctx.currentTime + 3.0);
+    if (!muted) master.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 2.5);
   }
 
-  // boat speed (m/s) → a whisper of extra water, never louder than calm
+  // boat speed (m/s) → livelier laps + the bow-wash rush
   function setSpeed(spd) {
-    if (!ctx || !speedGain) return;
-    speedGain.gain.setTargetAtTime(0.55 + Math.min(spd / 6.5, 1) * 0.15, ctx.currentTime, 0.8);
+    speedNorm = Math.min(Math.max(spd, 0) / 6.5, 1);
+    if (ctx && washGain) washGain.gain.setTargetAtTime(speedNorm * 0.12, ctx.currentTime, 0.9);
   }
 
   function setMuted(m) {
     muted = m;
     if (!ctx) { if (!m) start(); return; }           // first unmute also starts it
-    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.7, ctx.currentTime, 0.2);
+    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.8, ctx.currentTime, 0.2);
   }
 
   return { start, setSpeed, setMuted, get muted() { return muted; } };
