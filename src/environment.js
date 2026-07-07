@@ -31,16 +31,17 @@ export const PRESETS = {
   },
 };
 
-// shared Gerstner swell for a light-breeze Baltic evening: a lazy dying swell, a
-// cross-swell, and fresh evening wind-sea with visibly peaked crests (Q steepness,
-// horizontal displacement). Σ steepness = 0.50 — sharp but loop-safe. The SAME
-// table is inlined into the water vertex shader and evaluated here in JS, so the
-// mesh, the boat, the camera, and the wake all ride identical waves.
+// shared Gerstner sea for the INNER archipelago: short fetch between islands
+// means chop, not ocean swell — the water is lively in texture but the level
+// barely breathes (±0.3 m), so the shoreline never runs metres up the rocks
+// and shore houses stay dry. Q keeps the crests visibly peaked. The SAME
+// table is inlined into the water vertex shader and evaluated here in JS, so
+// the mesh, the boat, the camera, and the wake all ride identical waves.
 //              amp    λ     dir x   dir z   ω      Q
 const WAVES = [
-  [0.55, 120, 0.95, 0.32, 0.55, 4.0],
-  [0.30, 70, -0.38, 0.92, 0.75, 5.0],
-  [0.16, 26, 0.62, -0.79, 1.55, 6.5],
+  [0.16, 90, 0.95, 0.32, 0.62, 6.0],
+  [0.10, 46, -0.38, 0.92, 0.95, 7.0],
+  [0.07, 18, 0.62, -0.79, 1.9, 9.0],
 ];
 function horizDisp(x, z, t) {
   let hx = 0, hz = 0;

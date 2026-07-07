@@ -377,7 +377,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const ground = heightAt(bx, bz);
     if (ground < -1.2) continue;                          // skip footprints over open water
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
-    const baseY = Math.max(ground, 0.25) - 0.06;
+    const baseY = Math.max(ground, 0.45) - 0.06;   // plinth clear of the chop
     const h = cls === 2 ? 5.0 : cls === 1 ? 2.0 : 2.5 + rng2() * 0.9;
     const r = rng2();
     // the Finnish coast palette: falu red with white knuts dominates, then

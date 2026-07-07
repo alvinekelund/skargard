@@ -169,12 +169,41 @@ function grassGeometry() {
 function reedGeometry() {
   const parts = [];
   for (const ry of [0, Math.PI / 2]) {
-    const p = new THREE.PlaneGeometry(0.55, 1.9);
-    p.translate(0, 0.95, 0);
+    const p = new THREE.PlaneGeometry(0.95, 2.3);
+    p.translate(0, 1.12, 0);
     p.rotateY(ry);
-    parts.push(paint(p, new THREE.Color(0xb0a05a)));
+    parts.push(paint(p, new THREE.Color(0xcdb96e)));
   }
   return BufferGeometryUtils.mergeGeometries(parts, false);
+}
+
+// dry Phragmites straw: near-vertical pale-yellow stems with brown seed
+// plumes — NOT the green grass texture, which made the belts invisible
+function reedTexture(seed) {
+  const S = 128, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  const rng = mulberry32(seed);
+  ctx.clearRect(0, 0, S, S);
+  for (let i = 0; i < 46; i++) {
+    const x = 6 + rng() * (S - 12);
+    const lean = (rng() - 0.5) * 10;
+    const hgt = S * (0.72 + rng() * 0.28);
+    const warm = 175 + rng() * 60;
+    ctx.strokeStyle = `rgba(${warm | 0},${warm * 0.82 | 0},${warm * 0.42 | 0},${0.75 + rng() * 0.25})`;
+    ctx.lineWidth = 1.4 + rng() * 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, S);
+    ctx.quadraticCurveTo(x + lean * 0.4, S - hgt * 0.6, x + lean, S - hgt);
+    ctx.stroke();
+    if (rng() < 0.6) {                                  // seed plume at the tip
+      ctx.fillStyle = `rgba(${110 + rng() * 40 | 0},${70 + rng() * 30 | 0},45,0.85)`;
+      ctx.fillRect(x + lean - 1.6, S - hgt - 7, 3.2, 8);
+    }
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
 }
 
 // a low rounded coastal rock slab — the smooth glaciated plates the Finnish
@@ -591,6 +620,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const grassTex = grassTexture(91);
   const grassMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.9, sway: 0.16, swayLo: 0.0, swayHi: 0.45, rimStrength: 0.4 });
   grassMat.map = grassTex; grassMat.alphaTest = 0.28; grassMat.side = THREE.DoubleSide;
+  const reedTex = reedTexture(47);
+  const reedMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.85, sway: 0.22, swayLo: 0.0, swayHi: 0.6, rimStrength: 0.5 });
+  reedMat.map = reedTex; reedMat.alphaTest = 0.26; reedMat.side = THREE.DoubleSide;
   const pineGeo = pineGeometry(mulberry32(1));
   const birchGeo = birchGeometry(mulberry32(2));
   const juniperGeo = juniperGeometry(mulberry32(3));
@@ -663,7 +695,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
   let treeBudget = 14000;
-  let grassBudget = 6000, slabBudget = 1300, reedBudget = 900;
+  let grassBudget = 6000, slabBudget = 1300, reedBudget = 2200;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
@@ -936,7 +968,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           // reed belts: SHELTERED shore nodes (mostly land around, soft cover)
           // — the clumps must stand in the SHALLOWS, so each sample walks
           // outward toward the water neighbours until it gets wet
-          if (reedBudget > 0 && treeRng() < 0.7) {
+          if (reedBudget > 0 && treeRng() < 0.85) {
             let land = 0, wox = 0, woz = 0;
             for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
               const jx = ix + ox, jz2 = iz + oz;
@@ -944,9 +976,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
               if (isLand) land++;
               else { wox += ox; woz += oz; }
             }
-            if (land >= 4 && land <= 7) {                  // a sheltered edge
+            if (land >= 3 && land <= 7) {                  // a sheltered edge
               const wl = Math.hypot(wox, woz) || 1;
-              for (let k = 0; k < 3 && reedBudget > 0; k++) {
+              for (let k = 0; k < 4 && reedBudget > 0; k++) {
                 for (const stepT of [0.5, 0.9, 1.4, 2.0]) {
                   const rlx = nlx + (wox / wl) * c.dx * stepT + (treeRng() - 0.5) * c.dx * 0.5;
                   const rlz = nlz + (woz / wl) * c.dz * stepT + (treeRng() - 0.5) * c.dz * 0.5;
@@ -1064,7 +1096,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
 
@@ -1187,7 +1219,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 14000;                   // region-wide cap: near islands (sorted first) win
-    grassBudget = 6000; slabBudget = 1300; reedBudget = 900;
+    grassBudget = 6000; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
@@ -1266,7 +1298,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     makeInstanced(slabGeo, boulderMat, slabMats);
     const grassMesh = makeInstanced(grassGeo, grassMat, grassMats);
     grassMesh.castShadow = false;
-    const reedMesh = makeInstanced(reedGeo, grassMat, reedMats);
+    const reedMesh = makeInstanced(reedGeo, reedMat, reedMats);
     reedMesh.castShadow = false;                     // tufts shade nothing; saves the shadow pass
 
     // the REAL Utö: Finland's oldest lighthouse + pilot village — when in range
