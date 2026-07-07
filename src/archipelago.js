@@ -387,6 +387,110 @@ function polySdf(lx, lz, ring, cut = null) {
   return inside ? d : -d;
 }
 
+// ── accelerated SDF for BIG rings (mainland tiles, Kemiönsaari-class
+//    islands): the exact polySdf is O(ring) per query, and a 600-vertex
+//    mainland tile meshed at 48k vertices would cost ~30M edge tests —
+//    seconds per tile. Instead: bucket the distance-eligible edges into a
+//    coarse cell grid (expanding-ring nearest search), and take the SIGN
+//    from which side of the nearest edge the point falls on, calibrated
+//    once per island against a known-inside cell. ──
+function buildSdfIndex(isl) {
+  const ring = isl.ring, n = ring.length, b = isl.bbox;
+  const W = b.maxX - b.minX, H = b.maxZ - b.minZ;
+  const cell = Math.max(30, Math.min(160, Math.sqrt(W * H) / 150));
+  const nx = Math.max(2, Math.ceil(W / cell) + 2), nz = Math.max(2, Math.ceil(H / cell) + 2);
+  const x0 = b.minX - cell, z0 = b.minZ - cell;
+  const nat = new Array(nx * nz);                    // natural edges: distance
+  const all = new Array(nx * nz);                    // every edge: parity walk
+  for (let j = 0; j < n; j++) {
+    const a = ring[j], c = ring[(j + 1) % n];
+    const cx0 = Math.max(0, Math.floor((Math.min(a[0], c[0]) - x0) / cell));
+    const cx1 = Math.min(nx - 1, Math.floor((Math.max(a[0], c[0]) - x0) / cell));
+    const cz0 = Math.max(0, Math.floor((Math.min(a[1], c[1]) - z0) / cell));
+    const cz1 = Math.min(nz - 1, Math.floor((Math.max(a[1], c[1]) - z0) / cell));
+    const natural = !(isl.cut && isl.cut.has(j));
+    for (let gz = cz0; gz <= cz1; gz++) for (let gx = cx0; gx <= cx1; gx++) {
+      const k = gz * nx + gx;
+      (all[k] || (all[k] = [])).push(j);
+      if (natural) (nat[k] || (nat[k] = [])).push(j);
+    }
+  }
+  // EXACT parity of every cell centre by scanline (per row: sorted ray
+  // crossings, then walk the columns) — queries refine from here
+  const par = new Uint8Array(nx * nz);
+  for (let rz = 0; rz < nz; rz++) {
+    const zc = z0 + (rz + 0.5) * cell;
+    const xs = [];
+    for (let j = 0; j < n; j++) {
+      const i2 = (j + 1) % n;
+      const zi = ring[i2][1], zj = ring[j][1];
+      if ((zi > zc) !== (zj > zc)) {
+        const xi = ring[i2][0], xj = ring[j][0];
+        xs.push(xi + (xj - xi) * (zc - zi) / (zj - zi));
+      }
+    }
+    xs.sort((p, q) => p - q);
+    let ptr = 0;
+    for (let gx = 0; gx < nx; gx++) {
+      const xc = x0 + (gx + 0.5) * cell;
+      while (ptr < xs.length && xs[ptr] <= xc) ptr++;
+      par[rz * nx + gx] = ptr & 1;
+    }
+  }
+  return { cell, nx, nz, x0, z0, nat, all, par };
+}
+function segCross(ax, az, bx, bz, cx2, cz2, dx2, dz2) {
+  const o = (px, pz, qx, qz, rx, rz) => (qx - px) * (rz - pz) - (qz - pz) * (rx - px);
+  const o1 = o(ax, az, bx, bz, cx2, cz2), o2 = o(ax, az, bx, bz, dx2, dz2);
+  const o3 = o(cx2, cz2, dx2, dz2, ax, az), o4 = o(cx2, cz2, dx2, dz2, bx, bz);
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+}
+// exact-parity, bucket-accelerated signed distance for big rings: the sign
+// starts from the query cell's precomputed centre parity and toggles on each
+// real edge crossed between centre and query point; the distance searches
+// natural-edge buckets in expanding shells
+function polySdfFast(lx, lz, isl) {
+  if (isl.ring.length <= 140 && !isl.cut) return polySdf(lx, lz, isl.ring);
+  if (!isl._sx) isl._sx = buildSdfIndex(isl);
+  const S = isl._sx, ring = isl.ring, n = ring.length;
+  const qx = Math.max(0, Math.min(S.nx - 1, Math.floor((lx - S.x0) / S.cell)));
+  const qz = Math.max(0, Math.min(S.nz - 1, Math.floor((lz - S.z0) / S.cell)));
+  let par = S.par[qz * S.nx + qx];
+  const ccx = S.x0 + (qx + 0.5) * S.cell, ccz = S.z0 + (qz + 0.5) * S.cell;
+  const cellEdges = S.all[qz * S.nx + qx];
+  if (cellEdges) for (const j of cellEdges) {
+    const a = ring[j], c = ring[(j + 1) % n];
+    if (segCross(ccx, ccz, lx, lz, a[0], a[1], c[0], c[1])) par ^= 1;
+  }
+  let best2 = Infinity;
+  const maxR = Math.max(S.nx, S.nz);
+  for (let r = 0; r <= maxR; r++) {
+    if (r > 1 && best2 < ((r - 1) * S.cell) * ((r - 1) * S.cell)) break;
+    const gx0 = Math.max(0, qx - r), gx1 = Math.min(S.nx - 1, qx + r);
+    const gz0 = Math.max(0, qz - r), gz1 = Math.min(S.nz - 1, qz + r);
+    for (let gz = gz0; gz <= gz1; gz++) {
+      const onZ = gz === gz0 || gz === gz1;
+      for (let gx = gx0; gx <= gx1; gx++) {
+        if (r > 0 && !onZ && gx !== gx0 && gx !== gx1) continue;   // shell only
+        const bkt = S.nat[gz * S.nx + gx];
+        if (!bkt) continue;
+        for (const j of bkt) {
+          const a = ring[j], c = ring[(j + 1) % n];
+          const dx = c[0] - a[0], dz = c[1] - a[1];
+          const L2 = dx * dx + dz * dz || 1e-9;
+          let t = ((lx - a[0]) * dx + (lz - a[1]) * dz) / L2;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          const px = a[0] + t * dx - lx, pz = a[1] + t * dz - lz;
+          const dd = px * px + pz * pz;
+          if (dd < best2) best2 = dd;
+        }
+      }
+    }
+  }
+  const d = best2 === Infinity ? 1e4 : Math.sqrt(best2);
+  return par ? d : -d;
+}
+
 // bilinear sample of a baked EU-DEM height grid (local island coords, dm ints)
 function gridH(g, lx, lz) {
   const fx = (lx - g.x0) / g.dx, fz = (lz - g.z0) / g.dz;
@@ -410,7 +514,7 @@ function islandHeight(lx, lz, isl) {
     // MAINLAND tile: distance-to-real-coast drives the shore ramp; the DEM
     // grid carries the interior. Adjacent tiles sample the same globally
     // aligned lattice, so seams match; heightAt's max() hides the skirts.
-    const sm = polySdf(lx, lz, isl.ring, isl.cut);
+    const sm = polySdfFast(lx, lz, isl);
     if (sm <= 0) return Math.max(sm * 0.55, -8.0) - 0.05;
     const shoreN = THREE.MathUtils.smoothstep(sm, 0, 60);
     let hm = isl.grid ? gridH(isl.grid, lx, lz) * shoreN
@@ -418,7 +522,7 @@ function islandHeight(lx, lz, isl) {
     hm += fbm((lx + isl.x) * 0.09 + (lz + isl.z) * 0.02, (lz + isl.z) * 0.09, 3) * 0.3 * shoreN;
     return hm - 0.05;
   }
-  const s = polySdf(lx, lz, isl.ring);
+  const s = polySdfFast(lx, lz, isl);
   if (s <= 0) return Math.max(s * 0.55, -8.0) - 0.05;      // gentle submerged apron
   const dome = Math.pow(THREE.MathUtils.smoothstep(s, 0, isl.S), 0.62);
   const cx = isl.x, cz = isl.z;
