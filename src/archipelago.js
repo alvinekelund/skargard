@@ -365,11 +365,16 @@ function buildHouse(rng) {
 // ── REAL map islands: each island is an actual OSM coastline polygon from the
 //    Archipelago Sea (Utö–Jurmo region), baked to public/archipelago_map.json. ──
 
-// signed distance to the island polygon: >0 inside (metres from shore), <0 at sea
-function polySdf(lx, lz, ring) {
+// signed distance to the island polygon: >0 inside (metres from shore), <0 at sea.
+// `cut` (mainland tiles): set of edge-start indices that are artificial clip
+// seams, not coast — they still bound the polygon (sign) but are IGNORED for
+// distance, so a seam between two tiles never reads as a shoreline.
+function polySdf(lx, lz, ring, cut = null) {
   let inside = false, d2 = Infinity;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const xi = ring[i][0], zi = ring[i][1], xj = ring[j][0], zj = ring[j][1];
+    if (((zi > lz) !== (zj > lz)) && (lx < (xj - xi) * (lz - zi) / (zj - zi) + xi)) inside = !inside;
+    if (cut && cut.has(j)) continue;                 // seam edge: sign only
     const dx = xj - xi, dz = zj - zi;
     const L2 = dx * dx + dz * dz || 1e-9;
     let t = ((lx - xi) * dx + (lz - zi) * dz) / L2;
@@ -377,9 +382,8 @@ function polySdf(lx, lz, ring) {
     const px = xi + t * dx - lx, pz = zi + t * dz - lz;
     const dd = px * px + pz * pz;
     if (dd < d2) d2 = dd;
-    if (((zi > lz) !== (zj > lz)) && (lx < (xj - xi) * (lz - zi) / (zj - zi) + xi)) inside = !inside;
   }
-  const d = Math.sqrt(d2);
+  const d = d2 === Infinity ? 1e4 : Math.sqrt(d2);
   return inside ? d : -d;
 }
 
@@ -402,6 +406,18 @@ function gridH(g, lx, lz) {
 function islandHeight(lx, lz, isl) {
   const b = isl.bbox;
   if (lx < b.minX - 24 || lx > b.maxX + 24 || lz < b.minZ - 24 || lz > b.maxZ + 24) return -8;
+  if (isl.cut) {
+    // MAINLAND tile: distance-to-real-coast drives the shore ramp; the DEM
+    // grid carries the interior. Adjacent tiles sample the same globally
+    // aligned lattice, so seams match; heightAt's max() hides the skirts.
+    const sm = polySdf(lx, lz, isl.ring, isl.cut);
+    if (sm <= 0) return Math.max(sm * 0.55, -8.0) - 0.05;
+    const shoreN = THREE.MathUtils.smoothstep(sm, 0, 60);
+    let hm = isl.grid ? gridH(isl.grid, lx, lz) * shoreN
+      : THREE.MathUtils.smoothstep(sm, 0, 140) * 6;        // no DEM yet: low coast
+    hm += fbm((lx + isl.x) * 0.09 + (lz + isl.z) * 0.02, (lz + isl.z) * 0.09, 3) * 0.3 * shoreN;
+    return hm - 0.05;
+  }
   const s = polySdf(lx, lz, isl.ring);
   if (s <= 0) return Math.max(s * 0.55, -8.0) - 0.05;      // gentle submerged apron
   const dome = Math.pow(THREE.MathUtils.smoothstep(s, 0, isl.S), 0.62);
@@ -652,7 +668,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
-    const A = rec.a, kind = rec.k;
+    // mainland coastline tiles carry q = cut-edge start indices (artificial
+    // clip seams); they scatter like forest but ramp height off real coast only
+    const cut = rec.q && rec.q.length ? new Set(rec.q) : null;
+    const A = rec.a, kind = rec.k === 'mainland' ? 'forest' : rec.k;
     const lg = Math.log10(Math.max(A / 300, 1));
     // REAL max height (EU-DEM, baked in dm) when the raster resolved the island;
     // otherwise the old kind/area heuristic — flagged so the data overlay can tell
@@ -665,7 +684,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       // rise length grows with real height too — tall islands must not jump
       // straight from the water (S is the whaleback's shore-to-crown distance)
       S: THREE.MathUtils.clamp(Math.max(Math.sqrt(A) * 0.14, (e > 0 ? e : 0) * 4.5), 4, 130),
-      kind, name: rec.n || null,
+      kind, name: rec.n || null, cut,
       realElev: e > 0, grid: rec.g || null,
       cover: coverIslands ? coverIslands[String(recIndex)] || null : null,   // satellite-classified land cover
     });
@@ -797,6 +816,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const edges = [];
       let total = 0;
       for (let i = 0; i < ring.length; i++) {
+        if (isl.cut && isl.cut.has(i)) continue;      // seams grow no shore trees
         const a = ring[i], q = ring[(i + 1) % ring.length];
         const mx = cx + (a[0] + q[0]) / 2, mz = cz + (a[1] + q[1]) / 2;
         if (Math.abs(mx - activeCenter.x) > RBUILD + 400 || Math.abs(mz - activeCenter.y) > RBUILD + 400) continue;
