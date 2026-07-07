@@ -1270,7 +1270,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   return {
-    group, update, islands, heightAt, rebuild, rebuildSync, setDebug, toggleSatellite,
+    group, update, islands, heightAt, islandHeight, rebuild, rebuildSync, setDebug, toggleSatellite,
     get debugOn() { return debugOn; },
     get debugInfo() { return lastCounts; },
     get satOn() { return satOn; },
