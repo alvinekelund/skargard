@@ -67,9 +67,13 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
   interior relief grid (Jurmo's long moraine back, Utö's lighthouse hill). The
   procedural fallback is now only sub-resolution rocks — median 166 m². Only tiny
   scalars live in git — no rasters.
-- **7,326 building footprints** (position, size, orientation, class), **1,094
-  piers**, **760 charted seamarks** with correct IALA types (lateral, all four
-  cardinals, lights) — OSM.
+- **18,346 building footprints** (position, size, orientation, class) — the
+  **NLS Finland topographic database** buildings layer (Maanmittauslaitos,
+  CC BY 4.0), which maps every building in the country, merged with OSM
+  ([`tools/bake_buildings_nls.py`](tools/bake_buildings_nls.py)). OSM alone
+  missed whole settled shores out here. Plus **1,094 piers** and **760
+  charted seamarks** with correct IALA types (lateral, all four cardinals,
+  lights) — OSM.
 - **Satellite-classified land cover** — the same Esri aerial imagery the terrain
   wears is classified per ~12 m pixel into forest / field / bare rock / heath
   ([`tools/bake_landcover.py`](tools/bake_landcover.py), 1,511 islands, calibrated
