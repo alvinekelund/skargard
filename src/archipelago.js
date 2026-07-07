@@ -437,7 +437,22 @@ function buildSdfIndex(isl) {
       par[rz * nx + gx] = ptr & 1;
     }
   }
-  return { cell, nx, nz, x0, z0, nat, all, par };
+  // multi-source BFS over the cell grid: distance (in cells) to the nearest
+  // natural-edge cell. Beyond the shore-ramp range the exact metres never
+  // matter (smoothstep saturates, the sea apron bottoms out), so far queries
+  // answer from this field and near ones get a BOUNDED exact search.
+  const dist = new Uint16Array(nx * nz).fill(65535);
+  const queue = [];
+  for (let k = 0; k < nat.length; k++) if (nat[k]) { dist[k] = 0; queue.push(k); }
+  for (let qi = 0; qi < queue.length; qi++) {
+    const k = queue[qi], gz = (k / nx) | 0, gx = k - gz * nx, nd = dist[k] + 1;
+    if (gx > 0 && dist[k - 1] > nd) { dist[k - 1] = nd; queue.push(k - 1); }
+    if (gx < nx - 1 && dist[k + 1] > nd) { dist[k + 1] = nd; queue.push(k + 1); }
+    if (gz > 0 && dist[k - nx] > nd) { dist[k - nx] = nd; queue.push(k - nx); }
+    if (gz < nz - 1 && dist[k + nx] > nd) { dist[k + nx] = nd; queue.push(k + nx); }
+  }
+  const hasNat = queue.length > 0;
+  return { cell, nx, nz, x0, z0, nat, all, par, hasNat, dist };
 }
 function segCross(ax, az, bx, bz, cx2, cz2, dx2, dz2) {
   const o = (px, pz, qx, qz, rx, rz) => (qx - px) * (rz - pz) - (qz - pz) * (rx - px);
@@ -462,8 +477,18 @@ function polySdfFast(lx, lz, isl) {
     const a = ring[j], c = ring[(j + 1) % n];
     if (segCross(ccx, ccz, lx, lz, a[0], a[1], c[0], c[1])) par ^= 1;
   }
+  // a fully-inland tile has no natural edges at all — without this check the
+  // shell search would sweep every cell for every vertex (seconds per tile)
+  if (!S.hasNat) return par ? 1e4 : -1e4;
+  const cd = S.dist[qz * S.nx + qx];
+  // far from any coast: the exact metres are ramp-saturated — answer from
+  // the BFS field (floor bound: (cd-1) cells is always a true lower bound)
+  if ((cd - 1) * S.cell > 160) {
+    const approx = (cd - 1) * S.cell;
+    return par ? approx : -approx;
+  }
   let best2 = Infinity;
-  const maxR = Math.max(S.nx, S.nz);
+  const maxR = Math.min(Math.max(S.nx, S.nz), cd + 2);   // an edge exists within cd cells
   for (let r = 0; r <= maxR; r++) {
     if (r > 1 && best2 < ((r - 1) * S.cell) * ((r - 1) * S.cell)) break;
     const gx0 = Math.max(0, qx - r), gx1 = Math.min(S.nx - 1, qx + r);

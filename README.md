@@ -58,15 +58,22 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
   and draped on the terrain by world position (`src/satellite.js`). Press `V` to
   toggle back to the stylised granite. This is the one thing that reaches the
   network at runtime; imagery © Esri, Maxar, Earthstar Geographics.
-- **7,462 island outlines** with names — OSM coastline polygons (© OpenStreetMap
-  contributors, ODbL), 1:1 scale.
-- **Island heights** — the **NLS Finland open DEM (10 m)** from Maanmittauslaitos
-  (CC BY 4.0, via the Paituli/Funet mirror), baked per island by
-  [`tools/bake_elevation_nls.py`](tools/bake_elevation_nls.py): **6,049 islands
-  (99.9 % of the land area) carry a real measured height**, 965 of them a bilinear
-  interior relief grid (Jurmo's long moraine back, Utö's lighthouse hill). The
-  procedural fallback is now only sub-resolution rocks — median 166 m². Only tiny
-  scalars live in git — no rasters.
+- **28,607 island outlines** (7,850 named) plus the **mainland coastline** from
+  Hanko around Helsinki to Porvoo, as 221 seam-masked coast tiles — OSM
+  coastline polygons (© OpenStreetMap contributors, ODbL), 1:1 scale, baked by
+  [`tools/bake_map.py`](tools/bake_map.py). The world spans **Utö to Porvoo**
+  (59.60–60.55°N, 21.00–25.95°E); islands crossing the box edge keep their
+  full outlines.
+- **Heights** — the **NLS Finland open DEM (10 m)** from Maanmittauslaitos
+  (CC BY 4.0, via the Paituli/Funet mirror), baked by
+  [`tools/bake_elevation_nls.py`](tools/bake_elevation_nls.py): **23,847
+  islands (99.96 % of Finnish island land area) carry a real measured height**,
+  3,948 of them a bilinear interior relief grid (Jurmo's long moraine back,
+  Kimitoön's 68 m highlands), plus 215 mainland tile grids on one globally
+  aligned lattice (tile seams match to millimetres). The procedural fallback
+  is sub-resolution rocks — and the few Estonian islets the box edge clips
+  (the Finnish DEM honestly has no data there). Only tiny scalars live in
+  git — no rasters.
 - **18,346 building footprints** (position, size, orientation, class) — the
   **NLS Finland topographic database** buildings layer (Maanmittauslaitos,
   CC BY 4.0), which maps every building in the country, merged with OSM
