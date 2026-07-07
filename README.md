@@ -58,22 +58,24 @@ orange ones are procedural; green/violet/yellow polygons are the mapped land cov
   and draped on the terrain by world position (`src/satellite.js`). Press `V` to
   toggle back to the stylised granite. This is the one thing that reaches the
   network at runtime; imagery © Esri, Maxar, Earthstar Geographics.
-- **28,607 island outlines** (7,850 named) plus the **mainland coastline** from
-  Hanko around Helsinki to Porvoo, as 221 seam-masked coast tiles — OSM
+- **47,340 island outlines** (11,065 named) plus the **mainland coastline**
+  from the Hanko peninsula around Helsinki to Porvoo, as 244 seam-masked coast
+  tiles (Fasta Åland, too big for one polygon, is tiled the same way) — OSM
   coastline polygons (© OpenStreetMap contributors, ODbL), 1:1 scale, baked by
-  [`tools/bake_map.py`](tools/bake_map.py). The world spans **Utö to Porvoo**
-  (59.60–60.55°N, 21.00–25.95°E); islands crossing the box edge keep their
-  full outlines.
+  [`tools/bake_map.py`](tools/bake_map.py). The world spans **Åland to Porvoo**
+  (59.60–60.55°N, 19.05–25.95°E) — from Märket lighthouse rock in the west to
+  the Porvoo archipelago in the east; islands crossing the box edge keep their
+  full outlines, and Swedish territory in the SW corner is clipped out.
 - **Heights** — the **NLS Finland open DEM (10 m)** from Maanmittauslaitos
   (CC BY 4.0, via the Paituli/Funet mirror), baked by
-  [`tools/bake_elevation_nls.py`](tools/bake_elevation_nls.py): **23,847
-  islands (99.96 % of Finnish island land area) carry a real measured height**,
-  3,948 of them a bilinear interior relief grid (Jurmo's long moraine back,
-  Kimitoön's 68 m highlands), plus 215 mainland tile grids on one globally
-  aligned lattice (tile seams match to millimetres). The procedural fallback
-  is sub-resolution rocks — and the few Estonian islets the box edge clips
-  (the Finnish DEM honestly has no data there). Only tiny scalars live in
-  git — no rasters.
+  [`tools/bake_elevation_nls.py`](tools/bake_elevation_nls.py): **37,593
+  islands (99.9 % of Finnish island land area) carry a real measured height**,
+  5,601 of them a bilinear interior relief grid (Jurmo's long moraine back,
+  Åland's 129 m Orrdalsklint, Kimitoön's highlands), plus 238 mainland tile
+  grids on one globally aligned lattice (tile seams match to millimetres). The
+  procedural fallback is sub-resolution rocks — and the few Estonian islets the
+  box edge clips (the Finnish DEM honestly has no data there). Only tiny
+  scalars live in git — no rasters.
 - **18,346 building footprints** (position, size, orientation, class) — the
   **NLS Finland topographic database** buildings layer (Maanmittauslaitos,
   CC BY 4.0), which maps every building in the country, merged with OSM

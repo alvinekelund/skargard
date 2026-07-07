@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Bake the EXPANDED archipelago map from OSM coastline data.
+"""Bake the ÅLAND-EXTENDED archipelago map from OSM coastline data.
 
-World: the whole south-west Finnish coast,
-    bbox lat 59.60..60.55, lon 21.00..25.95   (Uto -> Porvoo)
-replacing the original Archipelago Sea box (59.70..60.20, 21.15..22.35).
+World: the whole south-west Finnish coast INCLUDING the full Åland Islands,
+    bbox lat 59.60..60.55, lon 19.05..25.95   (Märket -> Porvoo)
+replacing the previous expanded box (59.60..60.55, 21.00..25.95), which in
+turn replaced the original Archipelago Sea box (59.70..60.20, 21.15..22.35).
 
 Outputs (NO elevation yet -- a follow-up bake adds e/g; public/ untouched):
-  <scratch>/map_expanded_raw.json   {center, scale, islands} exactly in the
+  <scratch>/map_aland_raw.json      {center, scale, islands} exactly in the
                                     record format of public/archipelago_map.json
-  <scratch>/cover_remap.json        {oldIslandIndex: newIslandIndex} so the
+  <scratch>/cover_remap_aland.json  {oldIslandIndex: newIslandIndex} from the
+                                    CURRENT SHIPPING public/archipelago_map.json
+                                    record order to the new order, so the
                                     satellite land-cover file (keyed by island
                                     index in map order) can be re-keyed
 
@@ -21,9 +24,9 @@ Record format (replicated from public/archipelago_map.json, verified):
   the treeless outer-sea exceptions Jurmo + Uto forced to "sparse";
   "n" = name where known.
 
-NEW in this bake -- MAINLAND coast tiles (Hanko peninsula, Helsinki, Porvoo):
-  open coastline chains are closed against the (unextended) bbox with the
-  classic walk-the-box algorithm (OSM coastline has water on the RIGHT of the
+MAINLAND coast tiles (Hanko peninsula, Helsinki, Porvoo):
+  open coastline chains are closed against the bbox with the classic
+  walk-the-box algorithm (OSM coastline has water on the RIGHT of the
   way direction), then cut into 8x8 km game-frame axis-aligned cells
   (Sutherland-Hodgman).  Each non-empty cell piece becomes one island record:
     k = "mainland"  (distinct from every normal-island kind; this exact
@@ -36,13 +39,37 @@ NEW in this bake -- MAINLAND coast tiles (Hanko peninsula, Helsinki, Porvoo):
         are dropped.  Inland lakes/lagoon rings are DISCARDED (a sailing game
         needs no inland water).
 
-Network discipline (Overpass): the fetch bbox = new bbox + 0.30 deg margin on
-all sides (so island rings crossing the box edge stitch to completion) is cut
-into ~0.6 x 0.3 deg tiles, one query at a time, 180 s timeout, short sleep
-between live queries, every response cached in the scratch dir and re-used on
-re-run (idempotent; re-run does zero network), 429/504 honoured with backoff,
-mirror fallback, and a hard 15-minute stonewall budget after which the script
-reports and aborts instead of hammering.
+NEW in this bake -- BIG-RING tiling + the Åland west strip:
+  * any CLOSED land ring with area > BIG_RING_MIN_M2 (550 km^2 -- that is
+    Fasta Åland at ~685 km^2 and nothing else; Kimitoön at ~548 km^2 stays a
+    single island record) gets the SAME 8 km clip-tile treatment as the
+    mainland: k="mainland", q cut-edge masks, slivers dropped.  The landmass
+    NAME goes on exactly ONE tile -- the piece whose bbox contains (or is
+    nearest to) the landmass area centroid -- so the map label and the HUD
+    location still work; all other tiles stay unnamed.
+  * SWEDEN CLIP: the bbox's SW corner reaches Swedish waters (Söderarm
+    skerries ~19.4E 59.75N; Understen stays west of the box).  Rings built
+    from Swedish coastline ways (per one cached Overpass admin-area query)
+    are dropped -- except Märket (19.13E 60.30N), the half-Finnish
+    half-Swedish lighthouse rock, which is kept whole on purpose.
+  * open chains living ENTIRELY west of lon 20.60 are dropped before the
+    mainland box-walk: there is no legitimate mainland there (only Swedish
+    fetch-margin fragments / broken strip rings), and a stray fragment would
+    otherwise fabricate land along the west bbox edge.
+
+Cache-compat fetching: the previous run's Overpass tiles are reused verbatim.
+The legacy fetch region (lon 20.70..26.25 = old bbox + margin) keeps its
+exact tile grid and cache names (coast_r{r}_c{c}.json, names_c{i}.json); only
+the NEW WEST strip (18.75..20.70) is fetched fresh under coastw_*/namesw_*
+names.  Legacy tiles are ingested FIRST so shared ways keep the cached
+geometry -- old-area output stays bit-identical to the shipping map.
+
+Network discipline (Overpass): ~0.5 x 0.3 deg tiles, one query at a time,
+180 s timeout, short sleep between live queries, every response cached in
+the scratch dir and re-used on re-run (idempotent; re-run does zero
+network), 429/504 honoured with backoff, mirror fallback, and a hard
+15-minute stonewall budget after which the script reports and aborts
+instead of hammering.
 """
 
 import hashlib
@@ -59,8 +86,8 @@ import urllib.request
 SCRATCH = ("/private/tmp/claude-501/-Users-alvinjobb-Projects-github-portfolio/"
            "88c16174-e79a-426d-a54a-ecf150c78848/scratchpad")
 CACHE = os.path.join(SCRATCH, "overpass_coast")
-OUT_MAP = os.path.join(SCRATCH, "map_expanded_raw.json")
-OUT_REMAP = os.path.join(SCRATCH, "cover_remap.json")
+OUT_MAP = os.path.join(SCRATCH, "map_aland_raw.json")
+OUT_REMAP = os.path.join(SCRATCH, "cover_remap_aland.json")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OLD_MAP = os.path.join(ROOT, "public", "archipelago_map.json")
 
@@ -69,25 +96,49 @@ LAT0, LON0 = 59.805, 21.49
 KZ = 111320.0
 KX = 111320.0 * math.cos(math.radians(LAT0))
 
-# the new world bbox (s, w, n, e) and the coastline fetch margin
-BBOX = (59.60, 21.00, 60.55, 25.95)
+# the world bbox (s, w, n, e): west edge extended to take in the FULL Åland
+# Islands (Eckerö, all of Fasta Åland, the outer skerries, and Märket at
+# 19.13E).  LEGACY_BBOX is the previous run's box -- it pins the legacy
+# Overpass cache tile grid so the old area re-processes from cache,
+# bit-identical.  Only the WEST edge may differ from LEGACY_BBOX (asserted
+# below): moving any other edge would need its own new fetch region.
+BBOX = (59.60, 19.05, 60.55, 25.95)
+LEGACY_BBOX = (59.60, 21.00, 60.55, 25.95)
 MARGIN = 0.30
 FETCH = (BBOX[0] - MARGIN, BBOX[1] - MARGIN, BBOX[2] + MARGIN, BBOX[3] + MARGIN)
+LEGACY_FETCH = (LEGACY_BBOX[0] - MARGIN, LEGACY_BBOX[1] - MARGIN,
+                LEGACY_BBOX[2] + MARGIN, LEGACY_BBOX[3] + MARGIN)
+assert BBOX[0] == LEGACY_BBOX[0] and BBOX[2] == LEGACY_BBOX[2] \
+    and BBOX[3] == LEGACY_BBOX[3] and BBOX[1] <= LEGACY_BBOX[1], \
+    "only a WEST extension is cache-compatible with the legacy tile grid"
 
 # Overpass
 ENDPOINTS = ["https://overpass-api.de/api/interpreter",
              "https://overpass.kumi.systems/api/interpreter"]
 UA = "archipelago-sunset-bake/1.0 (personal sailing-game project)"
-TILE_LON, TILE_LAT = 0.555, 0.31          # ~0.6 x 0.3 deg -> 10 x 5 = 50 tiles
+TILE_LON, TILE_LAT = 0.555, 0.31          # legacy grid: 10 x 5 = 50 tiles
 QUERY_SLEEP = 5.0                          # s between live queries
 STONEWALL_BUDGET = 15 * 60.0               # s of CONSECUTIVE failure waiting
 
+# coastline fetch regions: (cache_prefix, fetch_box).  LEGACY FIRST -- way
+# dedup keeps the first copy seen, so ways shared across the region seam
+# keep the cached (old-run) geometry.  Same for the name regions below.
+COAST_REGIONS = [("coast", LEGACY_FETCH)]
+NAME_REGIONS = [("names_c", (LEGACY_FETCH[1], LEGACY_FETCH[3]), 3)]
+if BBOX[1] < LEGACY_BBOX[1]:
+    WEST_FETCH = (FETCH[0], FETCH[1], FETCH[2], LEGACY_FETCH[1])
+    COAST_REGIONS.append(("coastw", WEST_FETCH))
+    NAME_REGIONS.append(("namesw_c", (WEST_FETCH[1], WEST_FETCH[3]), 1))
+
 # classification (inferred from the current file: bald<10k<=sparse<115k<=forest,
-# with the famously treeless Jurmo & Uto forced to sparse despite their size)
+# with the famously treeless Jurmo & Uto forced to sparse despite their size).
+# Anchored to fixed game-frame points: the shipping map now contains TWO named
+# Jurmos (Korpo's treeless one AND Brändö's larger, forested one), so the old
+# max-area match would flip the wrong island.
 KIND_BALD_MAX = 10_000
 KIND_SPARSE_MAX = 115_000
-FORCED_SPARSE = ("Jurmo", "Utö")      # matched near the OLD map's centroids
-# src/archipelago.js line ~674 already implements the mainland contract:
+FORCED_SPARSE = {"Jurmo": (6165.0, -2302.0), "Utö": (-6627.0, 2757.0)}
+# src/archipelago.js line ~800 already implements the mainland contract:
 #   const cut = rec.q && rec.q.length ? new Set(rec.q) : null;
 #   const kind = rec.k === 'mainland' ? 'forest' : rec.k;
 # so the distinct kind value for mainland tiles is the STRING "mainland"
@@ -99,14 +150,40 @@ CELL = 8000.0                              # mainland tile size, m
 SLIVER = 20_000.0                          # m^2, drop smaller mainland pieces
 HEAL_DIST = 250.0                          # m, endpoint snap for OSM gaps
 
+# big-ring tiling: closed rings above this area get the mainland clip-tile
+# treatment.  550 km^2 catches Fasta Åland (~685 km^2) and NOTHING else --
+# the runner-up, Kimitoön, measures 547,952,121 m^2 full-res (0.4 % below
+# the line; safe while its ring reprocesses from the same cache).
+BIG_RING_MIN_M2 = 550e6
+
+# Sweden clip: admin-area query box for Swedish coastline ways (SW corner of
+# the world box up to Märket's latitude band), the Märket keep-radius, and a
+# geometric fallback zone (west of lon 19.62, south of lat 60.05 -- Söderarm
+# waters; no Finnish land lives there) if the area query yields nothing.
+SWEDEN_BOX = (59.50, 18.90, 60.55, 19.90)
+MARKET_LL = (60.3007, 19.1312)             # lat, lon of the Märket rock
+MARKET_KEEP_M = 1500.0
+SWEDEN_FALLBACK_LON, SWEDEN_FALLBACK_LAT = 19.62, 60.05
+WEST_CHAIN_GUARD_LON = 20.60               # opens entirely W of this: dropped
+
 # RDP tolerances by pre-simplification area (m -> m^2 buckets); the tune loop
 # scales the small buckets first (f_small), then everything (f_all)
 TOL_TABLE = [(2_000, 5.0), (10_000, 8.0), (115_000, 14.0),
              (1_000_000, 25.0), (10_000_000, 40.0), (float("inf"), 55.0)]
 SMALL_BUCKETS = 3                          # first N buckets scale with f_small
 MAINLAND_TOL = 15.0                        # m, natural mainland edges
-MAX_MB = 9.0                               # start tuning above this
-HARD_MAX_MB = 9.5                          # gate
+MAX_MB = 12.5                              # start tuning above this (tuning
+                                           # would break old-area identity, so
+                                           # the budget is deliberately roomy)
+HARD_MAX_MB = 13.0                         # gate
+
+# sanity-gate anchors (game-frame approx centroids, disambiguating duplicate
+# names: e.g. Jurmo-of-Korpo vs Jurmo-of-Brändö) and the Åland name roster
+BENCHMARKS = {"Jurmo": (5710.0, -2054.0), "Utö": (-6627.0, 2757.0),
+              "Nötö": (14828.0, -16667.0), "Biskopsö": (24453.0, -40632.0),
+              "Storlandet": (17847.0, -41505.0)}
+ALAND_NAMES = ["Eckerö", "Lemland", "Lumparland", "Vårdö", "Kumlinge",
+               "Kökar", "Föglö", "Sottunga", "Brändö", "Märket", "Lågskär"]
 
 EPS = 1e-9
 
@@ -185,62 +262,84 @@ def overpass(query, cache_name):
 
 
 def fetch_coastline():
-    """All natural=coastline ways over the fetch box, tiled, deduped by id.
-    Returns {way_id: (first_node, last_node, [(x,z)...], name_or_None,
-                      place_or_None)} in game-frame floats."""
-    s0, w0, n0, e0 = FETCH
-    ncols = max(1, round((e0 - w0) / TILE_LON))
-    nrows = max(1, round((n0 - s0) / TILE_LAT))
-    dlon = (e0 - w0) / ncols
-    dlat = (n0 - s0) / nrows
+    """All natural=coastline ways over every fetch region, tiled, deduped by
+    id (first region wins -- legacy cache geometry is authoritative for ways
+    shared across the region seam).  Returns {way_id: (first_node, last_node,
+    [(x,z)...], name_or_None, place_or_None)} in game-frame floats."""
     ways = {}
     tiles = 0
-    for r in range(nrows):
-        for c in range(ncols):
-            s, n = s0 + r * dlat, s0 + (r + 1) * dlat
-            w, e = w0 + c * dlon, w0 + (c + 1) * dlon
-            q = (f"[out:json][timeout:180];"
-                 f'way["natural"="coastline"]({s:.4f},{w:.4f},{n:.4f},{e:.4f});'
-                 f"out geom;")
-            data = overpass(q, f"coast_r{r}_c{c}.json")
-            tiles += 1
-            for el in data.get("elements", []):
-                if el.get("type") != "way" or el["id"] in ways:
-                    continue
-                nodes = el.get("nodes") or []
-                geom = el.get("geometry") or []
-                if len(nodes) < 2 or len(geom) != len(nodes) or any(
-                        g is None for g in geom):
-                    continue
-                pts = [proj(g["lon"], g["lat"]) for g in geom]
-                tags = el.get("tags") or {}
-                ways[el["id"]] = (nodes[0], nodes[-1], pts,
-                                  tags.get("name"), tags.get("place"))
+    for prefix, fbox in COAST_REGIONS:
+        s0, w0, n0, e0 = fbox
+        ncols = max(1, round((e0 - w0) / TILE_LON))
+        nrows = max(1, round((n0 - s0) / TILE_LAT))
+        dlon = (e0 - w0) / ncols
+        dlat = (n0 - s0) / nrows
+        for r in range(nrows):
+            for c in range(ncols):
+                s, n = s0 + r * dlat, s0 + (r + 1) * dlat
+                w, e = w0 + c * dlon, w0 + (c + 1) * dlon
+                q = (f"[out:json][timeout:180];"
+                     f'way["natural"="coastline"]({s:.4f},{w:.4f},{n:.4f},{e:.4f});'
+                     f"out geom;")
+                data = overpass(q, f"{prefix}_r{r}_c{c}.json")
+                tiles += 1
+                for el in data.get("elements", []):
+                    if el.get("type") != "way" or el["id"] in ways:
+                        continue
+                    nodes = el.get("nodes") or []
+                    geom = el.get("geometry") or []
+                    if len(nodes) < 2 or len(geom) != len(nodes) or any(
+                            g is None for g in geom):
+                        continue
+                    pts = [proj(g["lon"], g["lat"]) for g in geom]
+                    tags = el.get("tags") or {}
+                    ways[el["id"]] = (nodes[0], nodes[-1], pts,
+                                      tags.get("name"), tags.get("place"))
     print(f"coastline: {tiles} tiles, {len(ways)} unique ways", flush=True)
     return ways
 
 
 def fetch_names():
-    """place=island/islet relations + ways + nodes with names, 3 lon chunks."""
-    s0, w0, n0, e0 = FETCH
+    """place=island/islet relations + ways + nodes with names, per region
+    (legacy: 3 lon chunks with their original cache names; west strip: 1)."""
+    s0, n0 = FETCH[0], FETCH[2]
     els, seen = [], set()
-    for i in range(3):
-        w = w0 + i * (e0 - w0) / 3
-        e = w0 + (i + 1) * (e0 - w0) / 3
-        q = (f"[out:json][timeout:180];("
-             f'relation["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
-             f'way["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
-             f'node["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
-             f");out center;")
-        data = overpass(q, f"names_c{i}.json")
-        for el in data.get("elements", []):
-            key = (el.get("type"), el.get("id"))
-            if key in seen:
-                continue
-            seen.add(key)
-            els.append(el)
+    for prefix, (w0, e0), nchunks in NAME_REGIONS:
+        for i in range(nchunks):
+            w = w0 + i * (e0 - w0) / nchunks
+            e = w0 + (i + 1) * (e0 - w0) / nchunks
+            q = (f"[out:json][timeout:180];("
+                 f'relation["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
+                 f'way["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
+                 f'node["place"~"^(island|islet)$"]["name"]({s0:.4f},{w:.4f},{n0:.4f},{e:.4f});'
+                 f");out center;")
+            data = overpass(q, f"{prefix}{i}.json")
+            for el in data.get("elements", []):
+                key = (el.get("type"), el.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                els.append(el)
     print(f"names: {len(els)} place elements", flush=True)
     return els
+
+
+def fetch_swedish_ways():
+    """Ids of natural=coastline ways inside SWEDEN (admin area) within the
+    SW guard box.  Used to clip Swedish skerries (Söderarm group) out of the
+    world; Märket is exempted by the caller.  One cached query."""
+    s, w, n, e = SWEDEN_BOX
+    q = (f"[out:json][timeout:180];"
+         f'area["ISO3166-1"="SE"][admin_level=2]->.se;'
+         f'way["natural"="coastline"](area.se)({s:.4f},{w:.4f},{n:.4f},{e:.4f});'
+         f"out ids;")
+    data = overpass(q, "sweden_coast_ways.json")
+    ids = {el["id"] for el in data.get("elements", [])
+           if el.get("type") == "way"}
+    print(f"sweden: {len(ids)} Swedish coastline ways in the guard box"
+          + ("" if ids else "  [EMPTY -- geometric fallback zone active]"),
+          flush=True)
+    return ids
 
 
 # ---------------------------------------------------------------- geometry
@@ -857,7 +956,8 @@ def tile_mainland(land_polys, rect, tol):
                     q = {qq if qq <= k else qq + 1 for qq in q}
                 rec = {"p": [[x, z] for x, z in ring],
                        "a": int(round(area)),
-                       "q": sorted(q)}
+                       "q": sorted(q),
+                       "_pno": pno}          # which input polygon; stripped
                 # one record per (cell x land-polygon piece): distinct land
                 # polygons meeting in one cell (bay mouths on the bbox edge)
                 # each keep their geometry
@@ -972,15 +1072,52 @@ def assign_names(islands, name_els, way_to_island):
     return stats
 
 
+def name_big_ring(br, name_els):
+    """Name a big diverted ring (Fasta Åland) with the same priority ladder
+    as assign_names: relation with the MOST member ways on the ring wins
+    (tie: lowest relation id), then place-tagged way names, then a lone way
+    name tag.  Returns the name or None (reported honestly)."""
+    wids = set(br["way_ids"])
+    best = None                                # (-hits, rel_id, name)
+    for el in sorted((e for e in name_els if e.get("type") == "relation"),
+                     key=lambda e: e["id"]):
+        hits = sum(1 for m in el.get("members", [])
+                   if m.get("type") == "way"
+                   and m.get("role", "") in ("outer", "")
+                   and m.get("ref") in wids)
+        if hits:
+            cand = (-hits, el["id"], el["tags"]["name"])
+            if best is None or cand < best:
+                best = cand
+    if best:
+        return best[2]
+    placed = sorted({nm for nm, pl in br["names"].values()
+                     if pl in ("island", "islet")})
+    if len(placed) == 1:
+        return placed[0]
+    allnames = sorted({nm for nm, pl in br["names"].values()})
+    if len(allnames) == 1:
+        return allnames[0]
+    return None
+
+
 # ---------------------------------------------------------------- pipeline
 def build():
     ways = fetch_coastline()
     name_els = fetch_names()
+    swedish_ids = fetch_swedish_ways()
     closed, opens, healed = stitch(ways)
 
-    # ---- islands: closed rings intersecting the (unextended) bbox, FULL ring
-    islands = []
+    mkx, mkz = proj(MARKET_LL[1], MARKET_LL[0])
+    swe_x_max, _ = proj(SWEDEN_FALLBACK_LON, 0)
+    _, swe_z_min = proj(0, SWEDEN_FALLBACK_LAT)
+
+    # ---- islands: closed LAND rings intersecting the bbox, FULL ring.
+    # Rings above BIG_RING_MIN_M2 (Fasta Åland) divert to mainland-style
+    # tiling; Swedish rings are clipped out (Märket exempt, kept whole).
+    islands, big_rings = [], []
     lagoons = 0
+    sweden_dropped = []
     for ch in closed:
         ring = ch["pts"]
         if len(ring) < 3:
@@ -995,8 +1132,30 @@ def build():
         if a < AREA_MIN:
             continue
         cx, cz = area_centroid(ring)
-        islands.append({"ring": ring, "a": int(round(a)), "cx": cx, "cz": cz,
-                        "way_ids": ch["way_ids"], "names": ch["names"]})
+        if math.hypot(cx - mkx, cz - mkz) > MARKET_KEEP_M:
+            swedish = (any(w in swedish_ids for w in ch["way_ids"])
+                       if swedish_ids else
+                       (cx < swe_x_max and cz > swe_z_min))
+            if swedish:
+                nm = next((n for n, p in ch["names"].values()), None)
+                sweden_dropped.append((nm, int(round(a))))
+                continue
+        rec = {"ring": ring, "a": int(round(a)), "cx": cx, "cz": cz,
+               "way_ids": ch["way_ids"], "names": ch["names"]}
+        if a > BIG_RING_MIN_M2:
+            big_rings.append(rec)
+        else:
+            islands.append(rec)
+    big_rings.sort(key=lambda r: -r["a"])
+
+    # cross-check: NOTHING Finnish lives in the geometric fallback zone, so
+    # any surviving ring there means the admin-area filter missed Sweden
+    sweden_kept_in_zone = sum(
+        1 for isl in islands
+        if isl["cx"] < swe_x_max and isl["cz"] > swe_z_min
+        and math.hypot(isl["cx"] - mkx, isl["cz"] - mkz) > MARKET_KEEP_M)
+    market_kept = any(math.hypot(isl["cx"] - mkx, isl["cz"] - mkz)
+                      <= MARKET_KEEP_M for isl in islands)
 
     # deterministic final order NOW (area desc, like the current file), so the
     # cover remap indices survive the size-tune loop untouched
@@ -1007,8 +1166,14 @@ def build():
             way_to_island[wid] = idx
 
     name_stats = assign_names(islands, name_els, way_to_island)
+    for br in big_rings:
+        br["n"] = name_big_ring(br, name_els)
+        print(f"big ring: a={br['a']/1e6:.1f} km^2 "
+              f"name={br['n']!r} ways={len(br['way_ids'])}", flush=True)
 
-    # ---- cover remap: old index -> new index by centroid + area agreement
+    # ---- preliminary remap (old NON-tile records -> new islands) on
+    # full-res centroids; feeds the old-name transfer.  The published remap
+    # is rebuilt after serialization over FINAL record positions (+ tiles).
     with open(OLD_MAP) as f:
         old = json.load(f)
     old_isl = old["islands"]
@@ -1021,6 +1186,8 @@ def build():
     seen_new = set()
     shifts = []
     for oi, orec in enumerate(old_isl):
+        if orec.get("k") == MAINLAND_K:
+            continue                         # tiles matched later, tile-to-tile
         ocx, ocz = area_centroid(orec["p"])
         oa = orec["a"]
         bi, bj = int(ocx // B), int(ocz // B)
@@ -1040,7 +1207,6 @@ def build():
                 dup_targets += 1
             seen_new.add(best)
             shifts.append(bd)
-    remap_rate = len(remap) / max(len(old_isl), 1)
 
     # name transfer for matched-but-unnamed islands (keeps every old name)
     transferred = 0
@@ -1050,13 +1216,16 @@ def build():
             islands[ni]["n"] = n
             transferred += 1
 
-    # ---- kinds (area rule + the two forced-sparse outer-sea islands, matched
-    # near the OLD map's centroids so the Brändö namesake of Jurmo is untouched)
+    # ---- kinds (area rule + the two forced-sparse outer-sea islands,
+    # anchor-matched so Brändö's larger Jurmo namesake stays untouched)
     forced_pts = {}
-    for fname in FORCED_SPARSE:
-        cands = [r for r in old_isl if r.get("n") == fname]
+    for fname, anchor in FORCED_SPARSE.items():
+        cands = [r for r in old_isl
+                 if r.get("n") == fname and r.get("k") != MAINLAND_K]
         if cands:
-            ref = max(cands, key=lambda r: r["a"])
+            ref = min(cands, key=lambda r: math.hypot(
+                area_centroid(r["p"])[0] - anchor[0],
+                area_centroid(r["p"])[1] - anchor[1]))
             forced_pts[fname] = area_centroid(ref["p"])
     for isl in islands:
         a = isl["a"]
@@ -1069,8 +1238,21 @@ def build():
                 k = "sparse"
         isl["k"] = k
 
-    # ---- mainland
-    land_polys, interior_ends = close_mainland(opens, RECT)
+    # ---- mainland: drop far-west open fragments first (Swedish fetch-margin
+    # coast bits / broken west-strip rings) -- there is no legitimate mainland
+    # chain west of the guard, and a stray fragment would otherwise walk the
+    # bbox and fabricate land along the new west edge
+    guard_x, _ = proj(WEST_CHAIN_GUARD_LON, 0)
+    west_frags = [o for o in opens if max(p[0] for p in o["pts"]) < guard_x]
+    opens_kept = [o for o in opens if max(p[0] for p in o["pts"]) >= guard_x]
+    if west_frags:
+        print(f"west-chain guard: dropped {len(west_frags)} open fragments "
+              f"entirely W of lon {WEST_CHAIN_GUARD_LON} "
+              f"(largest {max(len(o['pts']) for o in west_frags)} pts)",
+              flush=True)
+    land_polys, interior_ends = close_mainland(opens_kept, RECT)
+    n_closure = len(land_polys)
+    tile_polys = land_polys + [br["ring"] for br in big_rings]
 
     # ---- serialize with the size-tune loop
     f_small, f_all, f_main = 1.0, 1.0, 1.0
@@ -1092,13 +1274,38 @@ def build():
             rec["_src"] = isl
             recs.append(rec)
 
-        tiles = tile_mainland(land_polys, RECT, MAINLAND_TOL * f_main)
-        tile_recs = [{"p": t["p"], "k": MAINLAND_K, "a": t["a"], "q": t["q"]}
-                     for t in tiles]
+        tiles = tile_mainland(tile_polys, RECT, MAINLAND_TOL * f_main)
+        tile_recs = [{"p": t["p"], "k": MAINLAND_K, "a": t["a"], "q": t["q"],
+                      "_pno": t["_pno"]} for t in tiles]
+
+        # name each big ring on exactly ONE of its tiles: the piece whose
+        # bbox contains the landmass area centroid, else the nearest piece
+        big_report = []
+        for bi, br in enumerate(big_rings):
+            pno = n_closure + bi
+            cand = [(i, t) for i, t in enumerate(tile_recs)
+                    if t["_pno"] == pno]
+            named_at = None
+            if cand and br.get("n"):
+                inside = [(i, t) for i, t in cand
+                          if min(p[0] for p in t["p"]) <= br["cx"]
+                          <= max(p[0] for p in t["p"])
+                          and min(p[1] for p in t["p"]) <= br["cz"]
+                          <= max(p[1] for p in t["p"])]
+                pool = inside or cand
+                named_at, pick = min(pool, key=lambda it: math.hypot(
+                    area_centroid(it[1]["p"])[0] - br["cx"],
+                    area_centroid(it[1]["p"])[1] - br["cz"]))
+                pick["n"] = br["n"]
+            big_report.append({"name": br.get("n"), "a": br["a"],
+                               "tiles": len(cand), "named_tile": named_at,
+                               "centroid": (br["cx"], br["cz"])})
 
         out_islands = [{k: v for k, v in r.items() if k != "_src"} for r in recs]
+        out_tiles = [{k: v for k, v in t.items() if k != "_pno"}
+                     for t in tile_recs]
         data = {"center": [LAT0, LON0], "scale": 1.0,
-                "islands": out_islands + tile_recs}
+                "islands": out_islands + out_tiles}
         blob = json.dumps(data, separators=(",", ":")).encode()
         if len(blob) <= MAX_MB * 1e6:
             break
@@ -1110,8 +1317,9 @@ def build():
         print(f"  json {len(blob)/1e6:.2f} MB > {MAX_MB} MB -> "
               f"tolerances x(f_small={f_small:.2f}, f_all={f_all:.2f})", flush=True)
 
-    # remap indices refer to positions in the FINAL islands array: recs was
-    # built from the sorted islands list 1:1 unless a ring degenerated
+    # ---- FINAL remap: old SHIPPING record index -> final new record index.
+    # Islands ride the preliminary match through recs positions; old mainland
+    # tiles match new tiles by centroid+area (tile-to-tile only).
     final_index = {}
     for pos, r in enumerate(recs):
         final_index[id(r["_src"])] = pos
@@ -1120,21 +1328,112 @@ def build():
         pos = final_index.get(id(islands[ni]))
         if pos is not None:
             remap_final[str(oi)] = pos
+    islands_matched = len(remap_final)
+
+    tbuck = {}
+    tile_cents = []
+    for pos, t in enumerate(out_tiles):
+        c = area_centroid(t["p"])
+        tile_cents.append(c)
+        tbuck.setdefault((int(c[0] // B), int(c[1] // B)), []).append(pos)
+    tiles_matched = 0
+    for oi, orec in enumerate(old_isl):
+        if orec.get("k") != MAINLAND_K:
+            continue
+        ocx, ocz = area_centroid(orec["p"])
+        oa = orec["a"]
+        bi, bj = int(ocx // B), int(ocz // B)
+        best, bd = None, 150.0
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                for pos in tbuck.get((bi + di, bj + dj), []):
+                    if not (0.6 <= out_tiles[pos]["a"] / max(oa, 1) <= 1.6):
+                        continue
+                    d = math.hypot(tile_cents[pos][0] - ocx,
+                                   tile_cents[pos][1] - ocz)
+                    if d < bd:
+                        best, bd = pos, d
+        if best is not None:
+            remap_final[str(oi)] = len(out_islands) + best
+            tiles_matched += 1
+            shifts.append(bd)
+
+    # hand-carry: benchmark islands that failed the automatic match are
+    # carried by name + nearest centroid so the cover re-key never loses them
+    hand_carried = []
+    new_named = {}
+    for pos, r in enumerate(out_islands):
+        if "n" in r:
+            new_named.setdefault(r["n"], []).append(pos)
+    for nm, anchor in BENCHMARKS.items():
+        olds = [(oi, r) for oi, r in enumerate(old_isl)
+                if r.get("n") == nm and r.get("k") != MAINLAND_K]
+        if not olds:
+            continue
+        oi, oref = min(olds, key=lambda t: math.hypot(
+            area_centroid(t[1]["p"])[0] - anchor[0],
+            area_centroid(t[1]["p"])[1] - anchor[1]))
+        if str(oi) in remap_final:
+            continue
+        ocx, ocz = area_centroid(oref["p"])
+        cands = new_named.get(nm, [])
+        if cands:
+            pos = min(cands, key=lambda p_: math.hypot(
+                area_centroid(out_islands[p_]["p"])[0] - ocx,
+                area_centroid(out_islands[p_]["p"])[1] - ocz))
+            remap_final[str(oi)] = pos
+            hand_carried.append((nm, oi, pos))
+
     remap_blob = json.dumps(remap_final, separators=(",", ":")).encode()
 
+    # ---- geometric-identity audit vs the shipping file (the whole point of
+    # cache reuse: matched old-area records should be bit-identical in p)
+    all_new = out_islands + out_tiles
+    ident = {"matched": 0, "p_identical": 0, "p_drifted": 0,
+             "max_shift": 0.0, "n_changed": 0}
+    for oi_s, npos in remap_final.items():
+        orec = old_isl[int(oi_s)]
+        nrec = all_new[npos]
+        ident["matched"] += 1
+        if orec["p"] == nrec["p"]:
+            ident["p_identical"] += 1
+        else:
+            ident["p_drifted"] += 1
+            oc = area_centroid(orec["p"])
+            nc = area_centroid(nrec["p"])
+            ident["max_shift"] = max(ident["max_shift"],
+                                     math.hypot(oc[0] - nc[0], oc[1] - nc[1]))
+        if orec.get("n") != nrec.get("n"):
+            ident["n_changed"] += 1
+
+    xw_legacy, _ = proj(LEGACY_BBOX[1], 0)
+    aland_strip = sum(1 for r in recs if r["_src"]["cx"] < xw_legacy)
+    west_closure_tiles = sum(
+        1 for t in tile_recs if t["_pno"] < n_closure
+        and min(p[0] for p in t["p"]) < guard_x)
+
     info = {
-        "islands": len(out_islands), "tiles": len(tile_recs),
-        "land_polys": len(land_polys),
+        "islands": len(out_islands), "tiles": len(out_tiles),
+        "closure_tiles": sum(1 for t in tile_recs if t["_pno"] < n_closure),
+        "land_polys": n_closure, "big": big_report,
         "lagoons": lagoons, "healed": healed, "interior_ends": interior_ends,
+        "west_frags": len(west_frags), "west_closure_tiles": west_closure_tiles,
         "name_stats": name_stats, "transferred_names": transferred,
         "remap": len(remap_final), "old_count": len(old_isl),
         "remap_rate": len(remap_final) / max(len(old_isl), 1),
-        "dup_targets": dup_targets,
+        "islands_matched": islands_matched, "tiles_matched": tiles_matched,
+        "hand_carried": hand_carried, "dup_targets": dup_targets,
         "shift_median": sorted(shifts)[len(shifts) // 2] if shifts else None,
+        "ident": ident, "aland_strip": aland_strip,
+        "sweden_dropped": sweden_dropped,
+        "sweden_mechanism": ("osm-admin-area" if swedish_ids
+                             else "geometric-fallback"),
+        "sweden_kept_in_zone": sweden_kept_in_zone,
+        "market_kept": market_kept,
         "f_small": f_small, "f_all": f_all, "f_main": f_main,
         "mb": len(blob) / 1e6,
         "named": sum(1 for r in out_islands if "n" in r),
-        "recs": recs, "tile_recs": tile_recs, "old_isl": old_isl,
+        "old_isl": old_isl,
     }
     return blob, remap_blob, info
 
@@ -1150,56 +1449,40 @@ def run_gates(blob, remap_blob, info, sha_ok):
     def gate(name, ok, detail):
         results.append((name, ok, detail))
 
-    # G1 old-area continuity by name + centroid
-    g1_names = ["Jurmo", "Utö", "Nötö", "Aspö",
-                "Biskopsö", "Storlandet"]
+    # G1 old-area continuity: benchmark names, anchor-disambiguated, new
+    # centroid within 50 m of the SHIPPING record (cache-identical expected)
     g1_ok, g1_det = True, []
-    for nm in g1_names:
-        olds = [r for r in old_isl if r.get("n") == nm]
+    for nm, anchor in BENCHMARKS.items():
+        olds = [r for r in old_isl
+                if r.get("n") == nm and r.get("k") != MAINLAND_K]
         news = [r for r in isl if r.get("n") == nm]
         if not olds or not news:
             g1_ok = False
-            g1_det.append(f"{nm}: MISSING ({'old' if not olds else 'new'})")
+            g1_det.append(f"{nm}:MISSING({'old' if not olds else 'new'})")
             continue
-        oref = max(olds, key=lambda r: r["a"])
+        oref = min(olds, key=lambda r: math.hypot(
+            area_centroid(r["p"])[0] - anchor[0],
+            area_centroid(r["p"])[1] - anchor[1]))
         ocx, ocz = area_centroid(oref["p"])
         d = min(math.hypot(area_centroid(r["p"])[0] - ocx,
                            area_centroid(r["p"])[1] - ocz) for r in news)
-        if d > 200.0:
+        if d > 50.0:
             g1_ok = False
-        g1_det.append(f"{nm}:{d:.0f}m")
-    gate("G1 old-area continuity (<=200 m)", g1_ok, " ".join(g1_det))
+        g1_det.append(f"{nm}:{d:.1f}m")
+    gate("G1 old-area continuity (<=50 m vs shipping)", g1_ok, " ".join(g1_det))
 
-    # G2 new-area presence by name, >=6 of 9
-    names = {r["n"] for r in isl if "n" in r}
-    hits = []
-    hits.append(("Kemiönsaari/Kimitoön",
-                 bool(names & {"Kemiönsaari", "Kimitoön"})))
-    hits.append(("Örö", "Örö" in names))
-    hits.append(("Russarö", "Russarö" in names))
-    hx, hz = proj(22.958, 59.822)
-    hanko_named = 0
+    # G2 Åland: >=8 of the 11 roster names present WEST of lon 21.2 (so a
+    # far-east namesake cannot fake a hit), Fasta Åland tiled with exactly
+    # one named tile per big ring, and q valid on every tile
+    x_al, _ = proj(21.2, 0)
+    west_names = set()
     for r in isl:
-        if "n" in r and r["n"] != "Russarö":
-            cx, cz = area_centroid(r["p"])
-            if math.hypot(cx - hx, cz - hz) < 10_000:
-                hanko_named += 1
-    hits.append((f"Hanko-area islands ({hanko_named} named<10km)", hanko_named >= 2))
-    suo = {"Suomenlinna", "Kustaanmiekka", "Susisaari", "Iso Mustasaari",
-           "Länsi-Mustasaari", "Pikku Mustasaari", "Pikku-Musta",
-           "Särkkä", "Lonna", "Vallisaari"}
-    hits.append(("Suomenlinna group",
-                 bool(names & suo) or any("Suomenlinna" in n for n in names)))
-    hits.append(("Isosaari", "Isosaari" in names))
-    hits.append(("Santahamina", "Santahamina" in names))
-    hits.append(("Emäsalo/Emsalö", bool(names & {"Emäsalo", "Emsalö"})))
-    hits.append(("Pellinki/Pellinge",
-                 any("Pellin" in n for n in names)))
+        if "n" in r:
+            cx, _cz = area_centroid(r["p"])
+            if cx < x_al:
+                west_names.add(r["n"])
+    hits = [(nm, nm in west_names) for nm in ALAND_NAMES]
     n_hit = sum(1 for _, ok in hits if ok)
-    gate(f"G2 new-area names ({n_hit}/9, need >=6)", n_hit >= 6,
-         " ".join(("OK:" if ok else "miss:") + nm for nm, ok in hits))
-
-    # G3 counts + q validity
     q_ok = True
     for t in tiles:
         n = len(t["p"])
@@ -1209,11 +1492,19 @@ def run_gates(blob, remap_blob, info, sha_ok):
                 or q[0] < 0 or q[-1] >= n):
             q_ok = False
             break
-    gate("G3 counts (isl 15k-60k, tiles>=40, q valid)",
-         15_000 <= len(isl) <= 60_000 and len(tiles) >= 40 and q_ok,
-         f"islands={len(isl)} tiles={len(tiles)} q_ok={q_ok}")
+    named_tiles = sum(1 for t in tiles if "n" in t)
+    big = info["big"]
+    big_ok = (len(big) == 1 and all(b["name"] for b in big)
+              and all(b["tiles"] >= 10 for b in big)
+              and all(b["named_tile"] is not None for b in big)
+              and named_tiles == len(big))
+    gate(f"G2 Åland ({n_hit}/11 names, need >=8; big rings + q)",
+         n_hit >= 8 and big_ok and q_ok,
+         " ".join(("OK:" if ok else "miss:") + nm for nm, ok in hits)
+         + f" | big={[(b['name'], b['tiles']) for b in big]}"
+         f" named_tiles={named_tiles} q_ok={q_ok}")
 
-    # G4 coordinate bounds (bbox +-0.35 deg)
+    # G3 counts, remap rate, size, bounds, Sweden
     mx0, _ = proj(BBOX[1] - 0.35, 0)
     mx1, _ = proj(BBOX[3] + 0.35, 0)
     _, mz0 = proj(0, BBOX[2] + 0.35)
@@ -1223,15 +1514,23 @@ def run_gates(blob, remap_blob, info, sha_ok):
         for x, z in r["p"]:
             if not (mx0 <= x <= mx1 and mz0 <= z <= mz1):
                 ob += 1
-    gate("G4 coords within bbox+-0.35deg", ob == 0, f"out-of-bounds verts={ob}")
+    sweden_ok = (info["sweden_kept_in_zone"] == 0
+                 and info["west_closure_tiles"] == 0
+                 and info["market_kept"])
+    gate("G3 counts 30k-75k, remap>=97%, <=13MB, bounds, no Sweden",
+         30_000 <= len(isl) <= 75_000
+         and info["remap_rate"] >= 0.97
+         and len(blob) <= HARD_MAX_MB * 1e6
+         and ob == 0 and sweden_ok,
+         f"islands={len(isl)} remap={info['remap_rate']*100:.2f}% "
+         f"{len(blob)/1e6:.2f}MB oob={ob} "
+         f"swe(kept_in_zone={info['sweden_kept_in_zone']} "
+         f"west_closure_tiles={info['west_closure_tiles']} "
+         f"märket_kept={info['market_kept']})")
 
-    # G5 size + remap rate
-    gate("G5 size<=9.5MB, remap>=90%",
-         len(blob) <= HARD_MAX_MB * 1e6 and info["remap_rate"] >= 0.90,
-         f"{len(blob)/1e6:.2f} MB, remap {info['remap_rate']*100:.1f}%")
-
-    # G6 idempotency
-    gate("G6 idempotent re-run (sha256)", sha_ok, "identical" if sha_ok else "DIFFERS")
+    # G4 idempotency
+    gate("G4 idempotent re-run (sha256)", sha_ok,
+         "identical" if sha_ok else "DIFFERS")
 
     print("\n---- SANITY GATES ----")
     allok = True
@@ -1264,11 +1563,19 @@ def main():
 
     tols = ", ".join(f"a<{amax:g}:{tol*info['f_all']*(info['f_small'] if i < SMALL_BUCKETS else 1):.1f}m"
                      for i, (amax, tol) in enumerate(TOL_TABLE))
+    ident = info["ident"]
     print(f"\n---- REPORT ----")
     print(f"outputs: {OUT_MAP} ({info['mb']:.2f} MB), {OUT_REMAP}")
-    print(f"islands: {info['islands']} ({info['named']} named)  "
-          f"mainland tiles: {info['tiles']} (k={MAINLAND_K!r}) "
-          f"from {info['land_polys']} closed land polygons")
+    print(f"islands: {info['islands']} ({info['named']} named; "
+          f"{info['aland_strip']} in the new Åland strip W of lon "
+          f"{LEGACY_BBOX[1]})  tiles: {info['tiles']} (k={MAINLAND_K!r}: "
+          f"{info['closure_tiles']} mainland-closure from "
+          f"{info['land_polys']} land polygons + big-ring tiles)")
+    for b in info["big"]:
+        print(f"big ring: {b['name']!r} a={b['a']/1e6:.1f} km^2 -> "
+              f"{b['tiles']} tiles, name on tile #{b['named_tile']} "
+              f"(record {info['islands'] + (b['named_tile'] or 0)}), "
+              f"centroid ({b['centroid'][0]:.0f},{b['centroid'][1]:.0f})")
     print(f"q encoding: sorted vertex indices i where edge i->(i+1)%n lies on a "
           f"clip line (8 km grid or bbox edge)")
     print(f"RDP tolerances: {tols}; mainland natural edges "
@@ -1277,13 +1584,27 @@ def main():
           f"way-tag={info['name_stats'][3]} node={info['name_stats'][4]} "
           f"center={info['name_stats'][5]} old-transfer={info['transferred_names']}")
     print(f"cover remap: {info['remap']}/{info['old_count']} "
-          f"({info['remap_rate']*100:.1f}%), dup targets {info['dup_targets']}, "
+          f"({info['remap_rate']*100:.2f}%: {info['islands_matched']} islands "
+          f"+ {info['tiles_matched']} tiles), hand-carried "
+          f"{info['hand_carried'] or 'none'}, dup targets {info['dup_targets']}, "
           f"median centroid shift {info['shift_median'] and round(info['shift_median'],1)} m")
+    print(f"old-area identity: {ident['p_identical']}/{ident['matched']} matched "
+          f"records bit-identical in p; {ident['p_drifted']} drifted "
+          f"(max centroid shift {ident['max_shift']:.1f} m); "
+          f"{ident['n_changed']} name changes")
+    print(f"sweden [{info['sweden_mechanism']}]: dropped "
+          f"{len(info['sweden_dropped'])} Swedish rings "
+          f"{sorted({nm for nm, _ in info['sweden_dropped'] if nm}) or ''}; "
+          f"kept-in-zone={info['sweden_kept_in_zone']}; "
+          f"Märket kept={info['market_kept']}")
     print(f"overpass: {_net['queries']} live queries, {_net['cache_hits']} cache hits, "
           f"{_net['retries']} retries, {_net['endpoint_switches']} mirror switches")
     print(f"caveats: {info['lagoons']} water-enclosing rings (lakes/lagoons) discarded; "
           f"{info['healed']} endpoint gaps healed; "
           f"{info['interior_ends']} chain ends inside bbox (dropped pieces); "
+          f"{info['west_frags']} far-west open fragments dropped pre-closure; "
+          f"Kimitoön sits {(BIG_RING_MIN_M2 - 547952121)/1e6:.1f} km^2 below the "
+          f"big-ring line (tight but cache-pinned); "
           f"S-H cell clips join multi-part land with zero-width bridges on cell "
           f"borders (marked in q)")
 

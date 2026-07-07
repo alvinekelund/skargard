@@ -57,17 +57,24 @@ def main():
     new_isl = json.load(open(args.map_new))["islands"]
     remap = json.load(open(args.remap))
 
-    # manual Storlandet carry: remap skipped old 0 (ring genuinely grew)
-    storlandet_new = max(
-        (i for i, r in enumerate(new_isl) if r.get("n") == "Storlandet"),
-        key=lambda i: new_isl[i]["a"], default=None)
-    if storlandet_new is None:
-        sys.exit("FATAL: no 'Storlandet' in the new map — cannot carry old index 0")
-    if old_isl[0].get("n") != "Storlandet":
-        sys.exit("FATAL: old index 0 is not Storlandet — the manual carry rule no longer applies")
+    # manual Storlandet carry is ONLY needed when the remap skipped old index 0
+    # (its OSM ring grew between bakes, as in the pre-expansion -> Uto/Porvoo
+    # migration). When the remap already covers "0" (the usual case, and the
+    # case for the Aland migration where old index 0 is Kimitoon), use it
+    # directly — no name-matching special case.
+    carry_zero = "0" not in remap
+    storlandet_new = None
+    if carry_zero:
+        storlandet_new = max(
+            (i for i, r in enumerate(new_isl) if r.get("n") == "Storlandet"),
+            key=lambda i: new_isl[i]["a"], default=None)
+        if storlandet_new is None:
+            sys.exit("FATAL: no 'Storlandet' in the new map — cannot carry old index 0")
+        if old_isl[0].get("n") != "Storlandet":
+            sys.exit("FATAL: old index 0 is not Storlandet — the manual carry rule no longer applies")
 
     def target_of(old_key):
-        if old_key == "0":
+        if old_key == "0" and carry_zero:
             return storlandet_new
         return remap.get(old_key)
 
@@ -108,7 +115,7 @@ def main():
             ocx, ocz = centroid(old_isl[int(k)])
             ncx, ncz = centroid(rec_new)
             dx, dz = ocx - ncx, ocz - ncz
-            if k == "0":
+            if k == "0" and carry_zero:
                 storlandet_delta = (dx, dz, math.hypot(dx, dz), t)
             e2 = dict(entry)
             e2["x0"] = round(entry["x0"] + dx, 1)
