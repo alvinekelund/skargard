@@ -92,8 +92,8 @@ MIN_AREA = 6.0                        # m^2 — skip degenerate footprints
 SMALL_AREA = 25.0                     # m^2 — below this: cls 1
 OTHER_SMALL_AREA = 120.0              # m^2 — 4226x below this: cls 1
 MERGE_R = 12.0                        # m — OSM within this of an NLS centre = same building
-MAX_JSON_MB = 8.0                     # the world quadrupled (Åland–Porvoo); the
-                                      # coast carries ~140k buildings even thinned
+MAX_JSON_MB = 8.6                     # Åland–Porvoo (incl. Åland/Mariehamn); the
+                                      # coast carries ~100k buildings even thinned
 MAX_TOTAL = 150000                    # runaway guard; MAX_JSON_MB is the real budget
 COAST_STEP = 60.0                     # m — coastline sample spacing
 PRE_SLACK = 3000.0                    # m — ring-bbox prefilter slack (never affects result)
@@ -867,7 +867,7 @@ def main():
     final = None
     out_mb = 0.0
     LADDER = ((args.coast_r, 4), (args.coast_r, 3), (args.coast_r, 2),
-              (args.coast_r_tight, 2), (args.coast_r_tight, 1))
+              (args.coast_r_tight, 2), (args.coast_r_tight, 1), (600.0, 1), (500.0, 1))
     for attempt_r, thin_k in LADDER:
         coast_r_used, thin_k_used = attempt_r, thin_k
         pairs, n_drop, n_exempt = coastal_filter(nls_all, cents, coast, attempt_r)
