@@ -56,9 +56,22 @@ the already-merged file reproduces it byte-for-byte (every NLS-derived
 record sits on an NLS centre so it is re-dropped from the "OSM" side, and
 previously kept OSM records keep failing the 12 m test the same way).
 
+World expansion (2026-07): the bake is bbox-parameterised (--bbox, default
+the full Uto->Porvoo box) and NEW territory gets a COASTAL FILTER: outside
+OLD_BBOX (the original 59.70..60.20 / 21.15..22.35 world, which keeps its
+historical unfiltered behaviour so nothing regresses) an NLS building is
+kept only when its centre lies within --coast-r metres (default 1200) of
+real coastline. Coastline = every island ring edge of archipelago_map.json
+sampled every ~60 m, plus mainland tiles' NATURAL edges only (each tile's
+q array lists cut-seam edge start indices, which are skipped). If the
+resulting archipelago_data.json would exceed the size budget the filter
+tightens itself to --coast-r-tight (default 800) and says so. A sailing
+game needs the shore to be real, not inland Uusimaa.
+
 Usage:
   python3 tools/bake_buildings_nls.py --cache /path/outside/repo
-Downloads (~50 MB of zips) are cached there and never touch the repo.
+Downloads (~1 GB of zips over the full box) are cached there and never
+touch the repo; open-sea 404s leave .404 markers so re-runs stay offline.
 """
 import argparse, io, json, math, os, struct, sys, time, urllib.request, zipfile
 
@@ -69,7 +82,9 @@ LAT0, LON0 = 59.805, 21.49            # game-frame origin (archipelago_map.json)
 M_LAT = 111320.0
 M_LON = 111320.0 * math.cos(math.radians(LAT0))
 
-BBOX = (59.70, 60.20, 21.15, 22.35)   # lat_min, lat_max, lon_min, lon_max
+DEFAULT_BBOX = (59.60, 60.55, 21.00, 25.95)  # lat_min, lat_max, lon_min, lon_max
+OLD_BBOX = (59.70, 60.20, 21.15, 22.35)      # original world: stays UNFILTERED
+BBOX = DEFAULT_BBOX                          # set from --bbox in main()
 
 BASE = "https://www.nic.funet.fi/index/geodata/mml/maastotietokanta/2025/shp/"
 
@@ -77,8 +92,11 @@ MIN_AREA = 6.0                        # m^2 — skip degenerate footprints
 SMALL_AREA = 25.0                     # m^2 — below this: cls 1
 OTHER_SMALL_AREA = 120.0              # m^2 — 4226x below this: cls 1
 MERGE_R = 12.0                        # m — OSM within this of an NLS centre = same building
-MAX_JSON_MB = 4.5
-MAX_TOTAL = 60000
+MAX_JSON_MB = 8.0                     # the world quadrupled (Åland–Porvoo); the
+                                      # coast carries ~140k buildings even thinned
+MAX_TOTAL = 150000                    # runaway guard; MAX_JSON_MB is the real budget
+COAST_STEP = 60.0                     # m — coastline sample spacing
+PRE_SLACK = 3000.0                    # m — ring-bbox prefilter slack (never affects result)
 CLS_CHURCH = {42270, 42250, 42251, 42252}
 CLS_OTHER = {42260, 42261, 42262}
 
@@ -210,7 +228,10 @@ def sheets_for_bbox():
 def fetch(url, dest, tries=3, timeout=60):
     """Disciplined downloader: hard timeout, bounded retries, no hangs.
 
-    Returns 'ok', 'missing' (HTTP 404 — open-sea half-sheets), or 'fail'."""
+    Returns 'ok', 'missing' (HTTP 404 — open-sea half-sheets), or 'fail'.
+    A 404 leaves a `<dest>.404` marker so re-runs never re-probe the sea."""
+    if os.path.exists(dest + ".404"):
+        return "missing"
     for attempt in range(tries):
         try:
             with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -221,6 +242,7 @@ def fetch(url, dest, tries=3, timeout=60):
             return "ok"
         except urllib.error.HTTPError as e:
             if e.code == 404:
+                open(dest + ".404", "w").close()
                 return "missing"
             print(f"  fetch {os.path.basename(dest)} attempt {attempt + 1}: HTTP {e.code}", flush=True)
         except Exception as e:
@@ -379,15 +401,154 @@ def min_area_rect(pts):
     return cx, cy, w, d, th
 
 
+# ---------------------------------------------------------- coastal filter
+def coast_samples(mapd):
+    """[(x, z), ...] every ~COAST_STEP m along real coastline (game frame).
+
+    Every ring edge of every island counts; mainland tiles contribute their
+    NATURAL edges only — q lists the start indices of artificial cut-seam
+    edges (8 km cell grid / bbox closure), which are no coast at all."""
+    out = []
+    for rec in mapd["islands"]:
+        p = rec["p"]
+        n = len(p)
+        if n < 2:
+            continue
+        cut = set(rec.get("q") or ()) if rec.get("k") == "mainland" else ()
+        for i in range(n):
+            if i in cut:
+                continue
+            ax, az = p[i]
+            bx, bz = p[(i + 1) % n]
+            steps = max(1, int(math.hypot(bx - ax, bz - az) // COAST_STEP))
+            for t in range(steps + 1):
+                f = t / steps
+                out.append((ax + (bx - ax) * f, az + (bz - az) * f))
+    return out
+
+
+class CoastHash:
+    """Grid hash over coast samples for 'any coast within r of (x,z)' tests."""
+
+    def __init__(self, samples, cell=400.0):
+        self.cell = cell
+        self.g = {}
+        for x, z in samples:
+            self.g.setdefault((int(x // cell), int(z // cell)), []).append((x, z))
+
+    def near(self, x, z, r):
+        r2 = r * r
+        c = self.cell
+        for gx in range(int((x - r) // c), int((x + r) // c) + 1):
+            for gz in range(int((z - r) // c), int((z + r) // c) + 1):
+                for sx, sz in self.g.get((gx, gz), ()):
+                    if (sx - x) ** 2 + (sz - z) ** 2 <= r2:
+                        return True
+        return False
+
+
+def tm35_prefilter(samples, coast_r):
+    """keep(bbox) predicate on TM35 ring bboxes: coarse, conservative.
+
+    Marks 6 km cells holding coast samples; a ring survives when its bbox
+    expanded by coast_r + PRE_SLACK touches a marked cell, or intersects the
+    OLD_BBOX exemption zone (+PRE_SLACK). Chebyshev over-keeps, never
+    over-drops, so the exact game-frame filter downstream stays the truth."""
+    cell = 6000.0
+    xs = np.array([s[0] for s in samples])
+    zs = np.array([s[1] for s in samples])
+    E, N = tm35fin(LON0 + xs / M_LON, LAT0 - zs / M_LAT)
+    occ = set(zip((E // cell).astype(int).tolist(), (N // cell).astype(int).tolist()))
+
+    lat_min, lat_max, lon_min, lon_max = OLD_BBOX
+    t = np.linspace(0.0, 1.0, 60)
+    blons = np.concatenate([lon_min + (lon_max - lon_min) * t,
+                            np.full_like(t, lon_min), np.full_like(t, lon_max),
+                            lon_min + (lon_max - lon_min) * t])
+    blats = np.concatenate([np.full_like(t, lat_min),
+                            lat_min + (lat_max - lat_min) * t,
+                            lat_min + (lat_max - lat_min) * t,
+                            np.full_like(t, lat_max)])
+    bE, bN = tm35fin(blons, blats)
+    ex_lo, ex_hi = bE.min() - PRE_SLACK, bE.max() + PRE_SLACK
+    en_lo, en_hi = bN.min() - PRE_SLACK, bN.max() + PRE_SLACK
+
+    pad = coast_r + PRE_SLACK
+
+    def keep(bbox):
+        e0, n0, e1, n1 = bbox
+        if e0 <= ex_hi and e1 >= ex_lo and n0 <= en_hi and n1 >= en_lo:
+            return True                                  # old-world exemption
+        for ge in range(int((e0 - pad) // cell), int((e1 + pad) // cell) + 1):
+            for gn in range(int((n0 - pad) // cell), int((n1 + pad) // cell) + 1):
+                if (ge, gn) in occ:
+                    return True
+        return False
+
+    return keep
+
+
+def in_old_bbox(clon, clat):
+    return (OLD_BBOX[0] <= clat <= OLD_BBOX[1]
+            and OLD_BBOX[2] <= clon <= OLD_BBOX[3])
+
+
+def coastal_filter(recs, cents, coast, r):
+    """Drop records whose centre sits outside OLD_BBOX and further than r
+    from every coast sample. Returns ([(rec, exempt), ...], n_dropped, n_exempt)."""
+    kept, n_drop, n_exempt = [], 0, 0
+    for b, (clon, clat) in zip(recs, cents):
+        if in_old_bbox(clon, clat):
+            kept.append((b, True))
+            n_exempt += 1
+        elif coast.near(b[0], b[1], r):
+            kept.append((b, False))
+        else:
+            n_drop += 1
+    return kept, n_drop, n_exempt
+
+
+def thin_new_area(pairs, k, cell=120.0):
+    """Deterministic density cap for NEW territory: keep at most k buildings
+    per cell x cell metre square, churches first, then the largest
+    footprints. The old world (exempt pairs) is never thinned.
+
+    Why this is safe: the runtime draws at most 450 buildings within 3.5 km
+    of the boat (~12/km^2); k=2 per 120 m cell still leaves ~139/km^2, an
+    order of magnitude above what the renderer will ever place. Urban
+    Helsinki keeps its shoreline silhouette, the data stays shippable."""
+    if k <= 0:
+        return [b for b, _ in pairs], 0
+    out = []
+    cells = {}
+    for b, exempt in pairs:
+        if exempt:
+            out.append(b)
+        else:
+            cells.setdefault((int(b[0] // cell), int(b[1] // cell)), []).append(b)
+    n_thin = 0
+    for key in sorted(cells):
+        lst = cells[key]
+        lst.sort(key=lambda b: (0 if b[5] == 2 else 1,          # churches first
+                                -(b[2] * b[3]),                  # then large
+                                b[0], b[1], b[2], b[3], b[4], b[5]))
+        out.extend(lst[:k])
+        n_thin += max(0, len(lst) - k)
+    return out, n_thin
+
+
 # -------------------------------------------------------------- aggregation
-def collect_buildings(cache_zip, sheet_list):
+def collect_buildings(cache_zip, sheet_list, keep_bbox=None):
     """Read every half-sheet, dedupe boundary copies, union split fragments.
 
-    Returns [(luokka, [pts]), ...] one entry per physical building."""
+    Returns [(luokka, [pts]), ...] one entry per physical building.
+    keep_bbox (TM35 ring-bbox predicate) drops far-inland rings early so the
+    full-box bake never holds all of urban Uusimaa in memory; it is built
+    with PRE_SLACK slack, so the exact coastal filter downstream decides."""
     seen_ring = set()
     by_gid = {}                                          # gid -> [record, ...]
     solo = []                                            # gid == 0
-    n_raw = n_dup = 0
+    n_raw = n_dup = n_pref = 0
     for name, half, _ in sheet_list:
         path = os.path.join(cache_zip, f"{name}{half}.shp.zip")
         if not os.path.exists(path):
@@ -406,10 +567,14 @@ def collect_buildings(cache_zip, sheet_list):
                 continue
             xs = [p[0] for r in kept for p in r]
             ys = [p[1] for r in kept for p in r]
+            bbox = (min(xs), min(ys), max(xs), max(ys))
+            if keep_bbox is not None and not keep_bbox(bbox):
+                n_pref += 1
+                continue
             rec = {
                 "luokka": luokka,
                 "rings": kept,
-                "bbox": (min(xs), min(ys), max(xs), max(ys)),
+                "bbox": bbox,
             }
             if gid > 0:
                 by_gid.setdefault(gid, []).append(rec)
@@ -444,13 +609,16 @@ def collect_buildings(cache_zip, sheet_list):
     for rec in solo:
         merged.append((rec["luokka"], rec["rings"]))
     print(f"building polygons: {n_raw} raw records, {n_dup} duplicate rings dropped, "
+          f"{n_pref} far-inland rings prefiltered, "
           f"{n_joined} boundary fragments unioned, {n_disjoint} same-id disjoint groups kept apart, "
           f"{len(merged)} physical buildings", flush=True)
     return merged
 
 
 def buildings_to_records(merged):
-    """Fit rects, project to the game frame, classify. Returns [[x,z,w,d,ang,cls],...]"""
+    """Fit rects, project to the game frame, classify.
+
+    Returns ([[x,z,w,d,ang,cls],...], [(clon,clat),...] aligned, n_outside)."""
     lat_min, lat_max, lon_min, lon_max = BBOX
     fits = []
     for luokka, rings in merged:
@@ -461,7 +629,7 @@ def buildings_to_records(merged):
         cE, cN, w, d, th = min_area_rect(pts)
         fits.append((luokka, area, cE, cN, w, d, th))
     if not fits:
-        return [], 0
+        return [], [], 0
     # batch inverse-project centre + one point along each rect axis
     E = np.empty(len(fits) * 3)
     N = np.empty(len(fits) * 3)
@@ -473,6 +641,7 @@ def buildings_to_records(merged):
     lon, lat = tm35fin_inv(E, N)
     X, Z = lonlat_to_world(lon, lat)
     out = []
+    cents = []
     n_outside = 0
     for i, (luokka, area, _, _, _, _, _) in enumerate(fits):
         clon, clat = lon[3 * i], lat[3 * i]
@@ -498,7 +667,8 @@ def buildings_to_records(merged):
         out.append([round(x0, 1), round(z0, 1),
                     max(0.1, round(w, 1)), max(0.1, round(d, 1)),
                     round(ang, 2), cls])
-    return out, n_outside
+        cents.append((clon, clat))
+    return out, cents, n_outside
 
 
 # -------------------------------------------------------------------- merge
@@ -530,9 +700,22 @@ def merge_with_osm(nls, osm):
 
 
 # ----------------------------------------------------------- sanity helpers
-def island_by_name(islands, name):
+def island_by_name(islands, name, near=None):
+    """Largest island with this name — or, with near=(x, z), the candidate
+    closest to that point (the expanded map holds THREE Biskopsö)."""
     cands = [r for r in islands if r.get("n") == name]
-    return max(cands, key=lambda r: r["a"]) if cands else None
+    if not cands:
+        return None
+    if near is None:
+        return max(cands, key=lambda r: r["a"])
+
+    def d2(r):
+        xs = [p[0] for p in r["p"]]
+        zs = [p[1] for p in r["p"]]
+        return ((sum(xs) / len(xs) - near[0]) ** 2
+                + (sum(zs) / len(zs) - near[1]) ** 2)
+
+    return min(cands, key=d2)
 
 
 def island_frame(rec):
@@ -563,11 +746,19 @@ def count_near(buildings, cx, cz, r):
 
 # --------------------------------------------------------------------- main
 def main():
+    global BBOX
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--data", default="public/archipelago_data.json")
     ap.add_argument("--map", default="public/archipelago_map.json")
     ap.add_argument("--cache", required=True, help="download cache dir (keep OUTSIDE the repo)")
+    ap.add_argument("--bbox", nargs=4, type=float, default=list(DEFAULT_BBOX),
+                    metavar=("LAT_MIN", "LAT_MAX", "LON_MIN", "LON_MAX"))
+    ap.add_argument("--coast-r", type=float, default=1200.0,
+                    help="new-area coastal keep radius, m")
+    ap.add_argument("--coast-r-tight", type=float, default=800.0,
+                    help="fallback radius when the size budget trips")
     args = ap.parse_args()
+    BBOX = tuple(args.bbox)
 
     checks = []
 
@@ -585,6 +776,18 @@ def main():
     print(f"TM35FIN inverse round-trip error (100 random bbox points): {rt_err:.2e} m", flush=True)
     if rt_err >= 0.5:
         sys.exit(f"FATAL: inverse transform round-trip error {rt_err} m >= 0.5 m")
+
+    # -- coastline (the coastal filter's ground truth) before any parsing
+    mapd = json.loads(open(args.map).read())
+    islands = mapd["islands"]
+    t0 = time.time()
+    samples = coast_samples(mapd)
+    coast = CoastHash(samples)
+    keep_bbox = tm35_prefilter(samples, args.coast_r)
+    n_tiles = sum(1 for r in islands if r.get("k") == "mainland")
+    print(f"coastline: {len(samples)} samples @{COAST_STEP:.0f} m from "
+          f"{len(islands) - n_tiles} islands + {n_tiles} mainland tiles "
+          f"(natural edges only) [{time.time() - t0:.1f}s]", flush=True)
 
     # -- download the half-sheet zips (cached; re-runs hit the cache only)
     cache_zip = os.path.join(args.cache, "zip")
@@ -617,16 +820,13 @@ def main():
 
     # -- parse + fit + project
     t0 = time.time()
-    merged = collect_buildings(cache_zip, sheets)
-    nls, n_outside = buildings_to_records(merged)
-    print(f"NLS buildings in bbox: {len(nls)} (dropped {n_outside} outside bbox, "
-          f"{len(merged) - len(nls) - n_outside} under {MIN_AREA} m^2) "
+    merged = collect_buildings(cache_zip, sheets, keep_bbox)
+    nls_all, cents, n_outside = buildings_to_records(merged)
+    print(f"NLS buildings in bbox: {len(nls_all)} (dropped {n_outside} outside bbox, "
+          f"{len(merged) - len(nls_all) - n_outside} under {MIN_AREA} m^2) "
           f"[{time.time() - t0:.1f}s]", flush=True)
-    cls_counts = {c: sum(1 for b in nls if b[5] == c) for c in (0, 1, 2)}
-    print(f"NLS classes: {cls_counts[0]} buildings, {cls_counts[1]} small/outbuildings, "
-          f"{cls_counts[2]} churches", flush=True)
 
-    # -- merge with the existing (OSM) buildings
+    # -- existing data (the old world's OSM extras + regression baselines)
     raw = open(args.data).read()
     data = json.loads(raw)
     before = data["buildings"]
@@ -640,15 +840,7 @@ def main():
         with open(baseline_path, "w") as f:
             json.dump(baseline, f)
 
-    kept = merge_with_osm(nls, before)
-    final = sorted(nls + kept, key=lambda b: (b[0], b[1], b[2], b[3], b[4], b[5]))
-    print(f"merge: {len(nls)} NLS + {len(kept)} kept of {len(before)} previous "
-          f"(rest were NLS twins within {MERGE_R:.0f} m) = {len(final)} total", flush=True)
-    if len(final) > MAX_TOTAL:
-        sys.exit(f"FATAL: {len(final)} buildings > {MAX_TOTAL} — mainland sheets or "
-                 f"non-building features ingested? refusing to write")
-
-    # -- splice ONLY the buildings array into the raw JSON text
+    # -- coastal filter (new territory only) + merge, with size-budget retry
     key = '"buildings":'
     i0 = raw.index(key)
     j = raw.index("[", i0)
@@ -663,23 +855,60 @@ def main():
             if depth == 0:
                 break
         j1 += 1
-    new_raw = raw[:j] + json.dumps(final, separators=(",", ":")) + raw[j1 + 1:]
-    out_mb = len(new_raw) / 1e6
-    if out_mb > MAX_JSON_MB:
-        sys.exit(f"FATAL: output {out_mb:.2f} MB > {MAX_JSON_MB} MB budget")
+
+    # coastal_filter returns (record, exempt) pairs; thin_new_area unwraps them,
+    # keeping EVERY old-square building (exempt) and density-capping only the new
+    # territory so urban Uusimaa/Turku fit the JSON budget. The runtime draws
+    # <=450 buildings/region regardless, so a per-cell cap costs nothing visible
+    # while cities keep their shoreline silhouette. Ladder: loosen radius/density
+    # first, tighten only if the file is over budget.
+    coast_r_used = args.coast_r
+    thin_k_used = 0
+    final = None
+    out_mb = 0.0
+    LADDER = ((args.coast_r, 4), (args.coast_r, 3), (args.coast_r, 2),
+              (args.coast_r_tight, 2), (args.coast_r_tight, 1))
+    for attempt_r, thin_k in LADDER:
+        coast_r_used, thin_k_used = attempt_r, thin_k
+        pairs, n_drop, n_exempt = coastal_filter(nls_all, cents, coast, attempt_r)
+        nls, n_thin = thin_new_area(pairs, thin_k)
+        cls_counts = {c: sum(1 for b in nls if b[5] == c) for c in (0, 1, 2)}
+        print(f"coastal @{attempt_r:.0f} m, thin k={thin_k}: {len(nls)} kept "
+              f"({n_exempt} exempt old-square, {n_drop} dropped inland, {n_thin} thinned); "
+              f"classes: {cls_counts[0]} buildings, {cls_counts[1]} small, "
+              f"{cls_counts[2]} churches", flush=True)
+        kept = merge_with_osm(nls, before)
+        final = sorted(nls + kept, key=lambda b: (b[0], b[1], b[2], b[3], b[4], b[5]))
+        print(f"merge: {len(nls)} NLS + {len(kept)} kept of {len(before)} previous "
+              f"(rest were NLS twins within {MERGE_R:.0f} m) = {len(final)} total", flush=True)
+        # metre-integer x/z/w/d — imperceptible on 15 m buildings, ~25% smaller
+        # JSON than 0.1 m floats, which is what keeps the whole coast in budget
+        final = [[int(round(b[0])), int(round(b[1])), int(round(b[2])),
+                  int(round(b[3])), round(b[4], 2), b[5]] for b in final]
+        new_raw = raw[:j] + json.dumps(final, separators=(",", ":")) + raw[j1 + 1:]
+        out_mb = len(new_raw) / 1e6
+        if len(final) <= MAX_TOTAL and out_mb <= MAX_JSON_MB:
+            break
+        print(f"  over budget ({out_mb:.2f} MB / {len(final)} bld) — tightening", flush=True)
+    if final is None or out_mb > MAX_JSON_MB or len(final) > MAX_TOTAL:
+        sys.exit(f"FATAL: could not fit budget — {out_mb:.2f} MB, {len(final) if final else 0} "
+                 f"buildings even at radius {args.coast_r_tight:.0f} m / k=1")
     identical = new_raw == raw
     with open(args.data, "w") as f:
         f.write(new_raw)
-    print(f"wrote {args.data}: {out_mb:.2f} MB"
+    print(f"wrote {args.data}: {out_mb:.2f} MB (coastal radius {coast_r_used:.0f} m)"
           + (" (byte-identical to previous — idempotent re-run)" if identical else ""),
           flush=True)
 
     # -- sanity gates ------------------------------------------------------
-    mapd = json.loads(open(args.map).read())
-    islands = mapd["islands"]
+    def lonlat_box(lat0, lat1, lon0, lon1):
+        """(x_lo, z_lo, x_hi, z_hi) game-frame bbox of a lat/lon box."""
+        x_lo, z_hi = lonlat_to_world(lon0, lat0)
+        x_hi, z_lo = lonlat_to_world(lon1, lat1)
+        return (x_lo, z_lo, x_hi, z_hi)
 
-    def counts_for(name):
-        rec = island_by_name(islands, name)
+    def counts_for(name, near=None):
+        rec = island_by_name(islands, name, near)
         if rec is None:
             return None
         cx, cz, bbox = island_frame(rec)
@@ -689,7 +918,7 @@ def main():
             "cx": cx, "cz": cz, "bbox": bbox,
         }
 
-    bisk = island_by_name(islands, "Biskopsö")
+    bisk = island_by_name(islands, "Biskopsö", near=(24453.0, -40632.0))
     print("\nvillage table (buildings with centre inside the island ring bbox):", flush=True)
     print(f"  {'island':<14} {'before':>7} {'after':>7}", flush=True)
     rows = {}
@@ -702,6 +931,7 @@ def main():
         print(f"  {'Biskopsö S':<14} {bs_before:>7} {bs_after:>7}", flush=True)
         print(f"  {'Biskopsö N':<14} {bn_before:>7} {bn_after:>7}", flush=True)
         rows["bisk_s"] = bs_after
+        rows["bisk_curr"] = count_in_bbox(before, bbox, z_min=cz)
     for nm in ("Utö", "Nötö", "Jurmo", "Aspö"):
         c = counts_for(nm)
         if c is None:
@@ -710,18 +940,62 @@ def main():
             print(f"  {nm:<14} {c['before']:>7} {c['after']:>7}", flush=True)
             rows[nm] = c
 
+    # per-place table over the whole world: before = the data file this run
+    # started from, after = what it wrote (the expansion in one glance)
+    hanko_box = lonlat_box(59.795, 59.850, 22.88, 23.02)
+    hki_box = lonlat_box(60.130, 60.200, 24.80, 25.20)
+    suom_box = lonlat_box(60.135, 60.155, 24.96, 25.01)
+    places = [("Hanko town", hanko_box), ("Helsinki coast", hki_box),
+              ("Suomenlinna", suom_box)]
+    emasalo = island_by_name(islands, "Emäsalo")
+    if emasalo is not None:
+        places.append(("Emäsalo", island_frame(emasalo)[2]))
+    pell_boxes = []
+    for nm in ("Suur-Pellinki", "Vähä-Pellinki"):
+        rec = island_by_name(islands, nm)
+        if rec is not None:
+            pell_boxes.append(island_frame(rec)[2])
+
+    print("\nper-place table (buildings, current file -> this bake):", flush=True)
+    print(f"  {'place':<16} {'before':>7} {'after':>7}", flush=True)
+    place_after = {}
+    for nm, box in places:
+        b_cnt = count_in_bbox(before, box)
+        a_cnt = count_in_bbox(final, box)
+        place_after[nm] = a_cnt
+        print(f"  {nm:<16} {b_cnt:>7} {a_cnt:>7}", flush=True)
+    pell_b = sum(count_in_bbox(before, bx) for bx in pell_boxes)
+    pell_a = sum(count_in_bbox(final, bx) for bx in pell_boxes)
+    print(f"  {'Pellinki':<16} {pell_b:>7} {pell_a:>7}", flush=True)
+    if bisk is not None:
+        print(f"  {'Biskopsö S':<16} {rows['bisk_curr']:>7} {rows['bisk_s']:>7}", flush=True)
+
     print("\nsanity gates:", flush=True)
     if bisk is None:
         gate(False, "Biskopsö island present in map")
     else:
-        gate(rows.get("bisk_s", 0) >= 5,
-             f"Biskopsö southern half: {rows.get('bisk_s', 0)} buildings (want >= 5)")
+        gate(rows.get("bisk_s", 0) >= 110,
+             f"Biskopsö southern half: {rows.get('bisk_s', 0)} buildings (want >= 110)")
     uto = rows.get("Utö")
     if uto is None:
         gate(False, "Utö island present in map")
     else:
         n600 = count_near(final, uto["cx"], uto["cz"], 600.0)
         gate(n600 >= 150, f"Utö village: {n600} buildings within 600 m of centre (want >= 150)")
+        uto_curr = count_in_bbox(before, uto["bbox"])
+        gate(abs(uto["after"] - uto_curr) <= 5,
+             f"Utö regression: {uto['after']} vs current {uto_curr} (want within ±5)")
+    gate(place_after.get("Hanko town", 0) > 400,
+         f"Hanko town: {place_after.get('Hanko town', 0)} buildings (want > 400)")
+    if emasalo is None:
+        gate(False, "Emäsalo island present in map")
+    else:
+        em_cnt = count_in_bbox(final, island_frame(emasalo)[2])
+        gate(em_cnt > 80, f"Emäsalo: {em_cnt} buildings (want > 80)")
+    gate(place_after.get("Suomenlinna", 0) > 25,
+         f"Suomenlinna group: {place_after.get('Suomenlinna', 0)} buildings (want > 25)")
+    gate(bool(pell_boxes) and pell_a > 40,
+         f"Pellinki group: {pell_a} buildings (want > 40)")
     gate(len(final) >= 10000, f"total buildings: {len(final)} (want >= 10000)")
 
     x_lo, _ = lonlat_to_world(BBOX[2], LAT0)
@@ -747,7 +1021,8 @@ def main():
         print("\nSANITY FAILED — file written, but do not trust it", flush=True)
         sys.exit(1)
     print(f"\nall gates passed — {len(final)} buildings "
-          f"({len(nls)} NLS + {len(kept)} OSM), {out_mb:.2f} MB", flush=True)
+          f"({len(nls)} NLS + {len(kept)} OSM), {out_mb:.2f} MB, "
+          f"coastal radius {coast_r_used:.0f} m", flush=True)
     print(CREDIT, flush=True)
 
 

@@ -370,6 +370,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   const C_ROOF = new THREE.Color(0x3a3532), C_ROOF2 = new THREE.Color(0x51413a), C_TILE = new THREE.Color(0x6e3a2c);
   const C_PLINTH = new THREE.Color(0x77726a), C_CHIM = new THREE.Color(0xcfcac0);
   const C_TRIM = new THREE.Color(0xf0ebdc), C_DOOR = new THREE.Color(0x4a3b2a);
+  // Nordic city-facade palette (rendered/plastered): cream, ochre, pale grey,
+  // terracotta, sand, blue-grey, muted rose — Helsinki/Turku Jugend + funkis
+  const URBAN = [0xd9d2c2, 0xcdb98d, 0xc9c3b8, 0xcaa58a, 0xc7b78f, 0xbfc3c2, 0xc39a8f]
+    .map((c) => new THREE.Color(c));
+  const C_UPLINTH = new THREE.Color(0x63615b), C_UROOF = new THREE.Color(0x34373b);
   const _c = new THREE.Color();
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
@@ -378,6 +383,37 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     if (ground < -1.2) continue;                          // skip footprints over open water
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
     const baseY = Math.max(ground, 0.45) - 0.06;   // plinth clear of the chop
+
+    // ── URBAN BLOCKS: real city footprints (Helsinki, Turku, Porvoo, Hanko,
+    //    Mariehamn cores) are large — apartment and office blocks, not red
+    //    cottages. Footprint area decides: a big plan becomes a multi-storey
+    //    rendered block with a flat roof and lit window rows in a muted city
+    //    palette; small plans fall through to the timber-cottage code. ──
+    const foot = bw * bd;
+    if (cls === 0 && foot > 240) {
+      const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
+      const floors = Math.max(2, Math.min(6, Math.round(Math.sqrt(foot) / 7)));
+      const fh = 3.15, bh = floors * fh;               // storey height, body height
+      const uc = URBAN[Math.floor(rngU() * URBAN.length)];
+      const uplace = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
+      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw + 0.2, 0.5, bd + 0.2).translate(0, 0.25, 0), C_UPLINTH)));
+      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw, bh, bd).translate(0, bh / 2 + 0.4, 0), uc)));
+      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw + 0.12, 0.32, bd + 0.12).translate(0, bh + 0.4, 0), C_UROOF)));
+      // lit window rows — one emissive band per storey on each face (the right
+      // LOD for a city seen from the water); nearest blocks only, for geometry
+      if (placed < 90) {
+        for (let fl = 0; fl < floors; fl++) {
+          const wy = 0.4 + fl * fh + fh * 0.58;
+          for (const sz of [1, -1])
+            winGeos.push(uplace(new THREE.BoxGeometry(bw * 0.9, 1.5, 0.06).translate(0, wy, sz * (bd / 2 + 0.02))));
+          for (const sx of [1, -1])
+            winGeos.push(uplace(new THREE.BoxGeometry(0.06, 1.5, bd * 0.9).translate(sx * (bw / 2 + 0.02), wy, 0)));
+        }
+      }
+      placed++;
+      continue;
+    }
+
     const h = cls === 2 ? 5.0 : cls === 1 ? 2.0 : 2.5 + rng2() * 0.9;
     const r = rng2();
     // the Finnish coast palette: falu red with white knuts dominates, then
