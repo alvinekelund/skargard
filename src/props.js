@@ -366,9 +366,10 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   };
   const C_RED = new THREE.Color(0x8a3326), C_DKRED = new THREE.Color(0x76281c);
   const C_GREY = new THREE.Color(0xb9b4a6), C_WHITE = new THREE.Color(0xe8e6df);
-  const C_YELL = new THREE.Color(0xc9a55a);
+  const C_YELL = new THREE.Color(0xc9a55a), C_TAR = new THREE.Color(0x3d3128);
   const C_ROOF = new THREE.Color(0x3a3532), C_ROOF2 = new THREE.Color(0x51413a), C_TILE = new THREE.Color(0x6e3a2c);
   const C_PLINTH = new THREE.Color(0x77726a), C_CHIM = new THREE.Color(0xcfcac0);
+  const C_TRIM = new THREE.Color(0xf0ebdc), C_DOOR = new THREE.Color(0x4a3b2a);
   const _c = new THREE.Color();
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
@@ -377,11 +378,15 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     if (ground < -1.2) continue;                          // skip footprints over open water
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
     const baseY = Math.max(ground, 0.25) - 0.06;
-    const h = cls === 2 ? 5.0 : cls === 1 ? 2.0 : 2.7;
+    const h = cls === 2 ? 5.0 : cls === 1 ? 2.0 : 2.5 + rng2() * 0.9;
     const r = rng2();
+    // the Finnish coast palette: falu red with white knuts dominates, then
+    // ochre yellow, white, weathered grey timber; sheds also go tar-brown
     const wallC = cls === 2 ? C_WHITE
-      : r < 0.66 ? (rng2() < 0.3 ? C_DKRED : C_RED)
-      : r < 0.82 ? C_GREY : (rng2() < 0.5 ? C_WHITE : C_YELL);
+      : cls === 1 ? (r < 0.55 ? C_RED : r < 0.75 ? C_TAR : r < 0.9 ? C_DKRED : C_GREY)
+      : r < 0.62 ? (rng2() < 0.3 ? C_DKRED : C_RED)
+      : r < 0.74 ? C_YELL : r < 0.86 ? C_WHITE : C_GREY;
+    const painted = wallC !== C_TAR && wallC !== C_GREY;
     const roofC = cls === 2 ? C_ROOF : rng2() < 0.2 ? C_TILE : (rng2() < 0.5 ? C_ROOF : C_ROOF2);
     // ridge runs along the LONG axis of the real footprint
     const along = bw >= bd ? bw : bd, across = bw >= bd ? bd : bw;
@@ -391,6 +396,14 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     // plinth + walls (footprint axes, not ridge axes)
     bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, 0.3, bd + 0.14).translate(0, 0.15, 0), C_PLINTH)));
     bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, h, bd).translate(0, h / 2 + 0.24, 0), wallC)));
+    // white corner boards (knutar) — THE tell of a Finnish timber house.
+    // On painted walls only; bare tar/grey timber goes without.
+    if (painted && cls !== 2) {
+      for (const sx of [1, -1]) for (const sz of [1, -1]) {
+        bodyGeos.push(placeF(paintGeo(
+          new THREE.BoxGeometry(0.17, h, 0.17).translate(sx * (bw / 2 - 0.03), h / 2 + 0.24, sz * (bd / 2 - 0.03)), C_TRIM)));
+      }
+    }
     // gabled roof: triangle profile extruded along the ridge, with eaves
     const ov = Math.min(0.35, across * 0.12);
     const rw = across + ov * 2, rl = along + ov * 2;
@@ -401,19 +414,59 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     roofGeo.translate(0, h + 0.22, -rl / 2);
     roofGeo.rotateY(Math.PI / 2);                        // extrusion → along the ridge
     bodyGeos.push(place(paintGeo(roofGeo, roofC)));
+    // white bargeboards up the gable rakes (vindskivor) on dwellings
+    if (cls === 0) {
+      const slope = Math.hypot(rw / 2, roofH);
+      for (const sx of [1, -1]) for (const sz of [1, -1]) {
+        const vy = roofH / slope, vz = -sz * (rw / 2) / slope;
+        const board = new THREE.BoxGeometry(0.12, 0.2, slope + 0.1);
+        board.rotateX(-Math.atan2(vy, vz));
+        board.translate(sx * rl / 2, h + 0.22 + roofH / 2, sz * rw / 4);
+        bodyGeos.push(place(paintGeo(board, C_TRIM)));
+      }
+    }
     // chimney near the ridge third-point on dwellings
     if (cls === 0 && rng2() < 0.85) {
       bodyGeos.push(place(paintGeo(
         new THREE.BoxGeometry(0.42, 0.9, 0.42).translate(along * (rng2() < 0.5 ? 0.22 : -0.22), h + roofH * 0.75, 0), C_CHIM)));
     }
-    // warm windows on both long walls (dwellings + churches)
+    // door on a long wall, white-framed; a third of the dwellings get a
+    // little porch roof over it (farstukvist)
+    if (cls !== 2) {
+      const ds = rng2() < 0.5 ? 1 : -1;
+      const dx = (rng2() - 0.5) * along * 0.5;
+      bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.95, 1.85, 0.08)
+        .translate(dx, 0.24 + 0.93, ds * (across / 2 + 0.03)), C_TRIM)));
+      bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.74, 1.7, 0.12)
+        .translate(dx, 0.24 + 0.86, ds * (across / 2 + 0.04)), C_DOOR)));
+      if (cls === 0 && rng2() < 0.35) {
+        bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(1.5, 0.1, 1.05)
+          .translate(dx, 0.24 + 2.05, ds * (across / 2 + 0.5)), C_TRIM)));
+        for (const ps of [1, -1]) {
+          bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.09, 1.85, 0.09)
+            .translate(dx + ps * 0.6, 0.24 + 0.95, ds * (across / 2 + 0.92)), C_TRIM)));
+        }
+      }
+    }
+    // windows: white surround + warm glass, on both long walls; a small
+    // gable-end pane where the roof is tall enough for a loft
     if (cls !== 1) {
       const nWin = Math.max(1, Math.min(3, Math.round(along / 3.2)));
       for (let wj = 0; wj < nWin; wj++) {
         const wx = (wj - (nWin - 1) / 2) * (along / (nWin + 0.4));
         for (const s of [1, -1]) {
-          winGeos.push(place(new THREE.BoxGeometry(0.55, 0.7, 0.06)
+          bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.74, 0.9, 0.05)
+            .rotateY(Math.PI / 2).translate(wx, h * 0.55 + 0.24, s * (across / 2 + 0.015)), C_TRIM)));
+          winGeos.push(place(new THREE.BoxGeometry(0.55, 0.7, 0.07)
             .rotateY(Math.PI / 2).translate(wx, h * 0.55 + 0.24, s * (across / 2 + 0.02))));
+        }
+      }
+      if (cls === 0 && roofH > 1.1) {
+        for (const sx of [1, -1]) {
+          bodyGeos.push(place(paintGeo(new THREE.BoxGeometry(0.07, 0.62, 0.56)
+            .translate(sx * (along / 2 + 0.015), h + roofH * 0.32 + 0.24, 0), C_TRIM)));
+          winGeos.push(place(new THREE.BoxGeometry(0.09, 0.45, 0.4)
+            .translate(sx * (along / 2 + 0.02), h + roofH * 0.32 + 0.24, 0)));
         }
       }
     }
