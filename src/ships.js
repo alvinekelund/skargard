@@ -48,6 +48,73 @@ function shipBlock(l, b, h, mat, taper = 0.16, sternRound = 0.12) {
   return new THREE.Mesh(geo, mat);
 }
 
+// cabin-window strip: dark plating with individual lit panes (a few dark),
+// so deck rows read as rows of windows instead of painted yellow bands
+let _stripTex = null;
+function windowStripTexture() {
+  if (_stripTex) return _stripTex;
+  const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 64;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#151a20'; ctx.fillRect(0, 0, 1024, 64);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let x = 6; x < 1024 - 18; x += 22) {
+    const lit = rnd() < 0.78;
+    ctx.fillStyle = lit ? `rgb(255,${196 + Math.floor(rnd() * 40)},${100 + Math.floor(rnd() * 40)})` : '#242c34';
+    ctx.fillRect(x, 14, 15, 36);
+  }
+  _stripTex = new THREE.CanvasTexture(cv);
+  _stripTex.wrapS = THREE.RepeatWrapping;
+  _stripTex.colorSpace = THREE.SRGBColorSpace;
+  return _stripTex;
+}
+// one texture repeat ≈ 46 windows ≈ 102 m of plating — scale the box UVs
+// so panes stay ~2.2 m wide whatever the strip length
+function windowStrip(len, h, x, y, z) {
+  const geo = new THREE.BoxGeometry(len, h, 0.3);
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * len / 102);
+  const tex = windowStripTexture();
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.5,
+    color: 0x8a8f96, roughness: 0.35, metalness: 0.15,
+  }));
+  m.position.set(x, y, z);
+  return m;
+}
+
+// the line's name painted huge along the hull side — the single strongest
+// identity carrier these ships have. Canvas → alpha texture on a thin
+// plane riding just off the plating (one mirrored copy per side).
+function letteringTexture(text, color) {
+  const cv = document.createElement('canvas'); cv.width = 2048; cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.font = '900 168px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '26px';
+  ctx.fillStyle = color;
+  ctx.fillText(text, 1024, 138);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+// the 180° yaw on the port copy flips facing AND apparent text direction —
+// they cancel, so one unmirrored texture serves both sides
+function hullLettering(g, text, color, len, hgt, x, y, halfB) {
+  const tex = letteringTexture(text, color);
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex, transparent: true, alphaTest: 0.04, roughness: 0.5,
+    polygonOffset: true, polygonOffsetFactor: -1,
+  });
+  for (const s of [1, -1]) {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(len, hgt), mat);
+    p.position.set(x, y, s * halfB);
+    p.rotation.y = s === 1 ? 0 : Math.PI;
+    g.add(p);
+  }
+}
+
 /* ── SCALE AUDIT — real vessels, real LOA. The Swan 36 is 11 m; a Baltic
    cruise ferry alongside her must feel like a moving building.
      Viking Glory      222 m LOA · 35 m beam · superstructure to ~50 m
@@ -60,24 +127,30 @@ const FERRY_DIMS = {
   silja: { L: 203, B: 32 },    // Silja Serenade class
 };
 
-// a Baltic cruise ferry (Viking Line / Silja Line) at TRUE scale — shaped
-// hull, six lit passenger decks, lifeboats, twin funnels
+// a Baltic cruise ferry at TRUE scale, built to be recognised, not just seen:
+//   Viking Glory — dark Viking-red hull with a snub near-vertical stem, white
+//     VIKING LINE along the plating, white superstructure wearing the black
+//     glass band, one red funnel.
+//   Silja Serenade — tall white slab of a hull, blue SILJA LINE lettering,
+//     long unbroken window strips, one white funnel with the blue top.
 function cruiseFerry(scheme) {
   const g = new THREE.Group();
   const viking = scheme === 'viking';
-  const hullMat = new THREE.MeshStandardMaterial({ color: viking ? 0xbe2f26 : 0xecefee, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide });
+  const hullMat = new THREE.MeshStandardMaterial({ color: viking ? 0xa11e22 : 0xf0f2f1, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide });
   const boot = new THREE.MeshStandardMaterial({ color: 0x141821, roughness: 0.5 });
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f5f2, roughness: 0.5, side: THREE.DoubleSide });
-  const accent = new THREE.MeshStandardMaterial({ color: viking ? 0xbe2f26 : 0x18408f, roughness: 0.5 });
+  const accent = new THREE.MeshStandardMaterial({ color: viking ? 0xbe2f26 : 0xf4f5f2, roughness: 0.5 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.35, metalness: 0.3 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x2b333d, roughness: 0.25, metalness: 0.2, emissive: 0xffca7a, emissiveIntensity: 0.55 });
+  const blackGlass = new THREE.MeshStandardMaterial({ color: 0x101418, roughness: 0.15, metalness: 0.4, emissive: 0x2b3d4d, emissiveIntensity: 0.25 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x1c3f94, roughness: 0.5 });
   const orange = new THREE.MeshStandardMaterial({ color: 0xe8631c, roughness: 0.6 });
 
   const { L, B } = FERRY_DIMS[scheme];
   const Hh = 12, draft = 6.5;
-  const hull = shipBlock(L, B, Hh + draft, hullMat);
+  // Glory's modern stem is snub and near-vertical; Serenade's is a classic rake
+  const hull = shipBlock(L, B, Hh + draft, hullMat, viking ? 0.08 : 0.17);
   hull.position.y = -draft;
-  const bootStripe = shipBlock(L * 1.002, B + 0.3, 1.2, boot);   // dark band at the waterline
+  const bootStripe = shipBlock(L * 1.002, B + 0.3, 1.2, boot, viking ? 0.08 : 0.17);
   bootStripe.position.y = 0.15;
   g.add(hull, bootStripe);
 
@@ -92,19 +165,37 @@ function cruiseFerry(scheme) {
     { l: L * 0.4, b: B - 16, h: 4.8 },
   ];
   let y = Hh;
+  const tierX = [];
   for (let i = 0; i < tiers.length; i++) {
     const t = tiers[i];
     const blk = shipBlock(t.l, t.b, t.h, white, 0.12);
     blk.position.set(-(L - t.l) * 0.12, y, 0);
+    tierX.push(-(L - t.l) * 0.12);
     g.add(blk);
-    // two window rows per tier
-    for (const wy of [y + t.h * 0.32, y + t.h * 0.72]) {
-      for (const s of [1, -1]) {
-        const w = box(t.l * 0.8, t.h * 0.26, 0.3, -(L - t.l) * 0.12 - t.l * 0.04, wy, s * (t.b / 2 + 0.05), glass);
-        g.add(w);
+    if (viking && (i === 2 || i === 3)) {
+      // the Glory black-glass band, flowing full-length around those decks
+      const bb = shipBlock(t.l * 0.98, t.b + 0.35, t.h * 0.82, blackGlass, 0.12);
+      bb.position.set(-(L - t.l) * 0.12, y + t.h * 0.09, 0);
+      g.add(bb);
+    } else {
+      // window rows: Serenade's read as long strips, Glory's as two rows —
+      // both built from individual lit panes, not painted bands
+      const rows = viking ? [y + t.h * 0.32, y + t.h * 0.72] : [y + t.h * 0.45];
+      const wh = viking ? t.h * 0.26 : t.h * 0.4;
+      for (const wy of rows) {
+        for (const s of [1, -1]) {
+          g.add(windowStrip(t.l * 0.84, wh, -(L - t.l) * 0.12 - t.l * 0.03, wy, s * (t.b / 2 + 0.05)));
+        }
       }
     }
     y += t.h;
+  }
+  // the line's name, huge along the side. Glory carries it white on the red
+  // hull; Serenade blue on the tall white hull — spanning two deck heights.
+  if (viking) {
+    hullLettering(g, 'VIKING LINE', '#f4f6f8', L * 0.55, 6.2, -L * 0.02, Hh * 0.5, B / 2 + 0.2);
+  } else {
+    hullLettering(g, 'SILJA LINE', '#1c3f94', L * 0.6, 7.5, -L * 0.02, Hh * 0.62, B / 2 + 0.2);
   }
   // lifeboats slung along the boat deck (orange, both sides)
   for (const s of [1, -1]) for (let k = 0; k < 8; k++) {
@@ -113,13 +204,13 @@ function cruiseFerry(scheme) {
     lb.position.set(L * 0.26 - k * 11, Hh + 13.5, s * (B / 2 - 0.7));
     g.add(lb);
   }
-  // two funnels (line colours) with black tops, set aft
-  for (const fx of [-L * 0.20, -L * 0.32]) {
-    const fn = shipBlock(14, 7.5, 11, accent, 0.2);
-    fn.position.set(fx, y, 0);
-    const cap = box(11.5, 1.8, 6.2, fx - 0.5, y + 11, 0, dark);
-    g.add(fn, cap);
-  }
+  // ONE funnel (both real ships): Glory's red, Serenade's white w/ blue top
+  const fn = shipBlock(16, 8, 11, accent, 0.22);
+  fn.position.set(-L * 0.26, y, 0);
+  const cap = viking
+    ? box(12.5, 1.8, 6.4, -L * 0.26 - 0.5, y + 11, 0, dark)
+    : box(13.5, 3.2, 6.8, -L * 0.26 - 0.5, y + 10.4, 0, blue);
+  g.add(fn, cap);
   // foremast + radar
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 16, 6), dark);
   mast.position.set(L * 0.3, Hh + 16, 0);
