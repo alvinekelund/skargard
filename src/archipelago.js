@@ -164,6 +164,19 @@ function grassGeometry() {
   return BufferGeometryUtils.mergeGeometries(parts, false);
 }
 
+// a reed clump — tall straw blades standing in the shallow water of
+// sheltered bays (they line every soft shore in the real archipelago)
+function reedGeometry() {
+  const parts = [];
+  for (const ry of [0, Math.PI / 2]) {
+    const p = new THREE.PlaneGeometry(0.55, 1.9);
+    p.translate(0, 0.95, 0);
+    p.rotateY(ry);
+    parts.push(paint(p, new THREE.Color(0xb0a05a)));
+  }
+  return BufferGeometryUtils.mergeGeometries(parts, false);
+}
+
 // a low rounded coastal rock slab — the smooth glaciated plates the Finnish
 // shore is made of (wider and flatter than a moraine boulder, lighter grey)
 function slabGeometry(rng) {
@@ -558,9 +571,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const juniperGeo = juniperGeometry(mulberry32(3));
   const boulderGeo = boulderGeometry(mulberry32(4));
   const grassGeo = grassGeometry();
+  const reedGeo = reedGeometry();
   const slabGeo = slabGeometry(mulberry32(6));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
-  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [], grassMats = [], slabMats = [];
+  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
   // ── islands from the REAL chart: every polygon is an actual island outline
@@ -624,7 +638,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
   let treeBudget = 6500;
-  let grassBudget = 4500, slabBudget = 1300;
+  let grassBudget = 4500, slabBudget = 1300, reedBudget = 900;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
@@ -744,7 +758,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           islandHeight(lx,lz+e,isl) - islandHeight(lx,lz-e,isl)) / (2*e);
         if (dy > 1.0 && treeRng() > 0.3) continue;
         const isBirch = treeRng() < 0.18;     // pine/spruce dominant, birch the accent
-        const sc = (isBirch ? 0.8 : 0.7) + treeRng() * (isBirch ? 0.7 : 1.5);
+        // REAL Nordic forest scale: mature 15–26 m canopy on the big sheltered
+        // islands, wind-stunted 5–12 m out on the exposed skerries — a pine
+        // must dwarf a house, not match it
+        const maturity = isl.A > 600000 ? 2.3 : isl.A > 120000 ? 1.8 : 1.15;
+        const sc = ((isBirch ? 0.8 : 0.7) + treeRng() * (isBirch ? 0.7 : 1.5)) * maturity;
         _p.set(cx + lx, y - 0.15, cz + lz);
         _s.set(sc * (0.85 + treeRng() * 0.3), sc, sc * (0.85 + treeRng() * 0.3));
         _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
@@ -827,6 +845,37 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             _m.compose(_p, _q, _s);
             slabMats.push(_m.clone());
             slabBudget--;
+          }
+          // reed belts: SHELTERED shore nodes (mostly land around, soft cover)
+          // — the clumps must stand in the SHALLOWS, so each sample walks
+          // outward toward the water neighbours until it gets wet
+          if (reedBudget > 0 && treeRng() < 0.7) {
+            let land = 0, wox = 0, woz = 0;
+            for (const [ox, oz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+              const jx = ix + ox, jz2 = iz + oz;
+              const isLand = jx >= 0 && jz2 >= 0 && jx < c.nx && jz2 < c.nz && c._v[jz2 * c.nx + jx] > 0;
+              if (isLand) land++;
+              else { wox += ox; woz += oz; }
+            }
+            if (land >= 4 && land <= 7) {                  // a sheltered edge
+              const wl = Math.hypot(wox, woz) || 1;
+              for (let k = 0; k < 3 && reedBudget > 0; k++) {
+                for (const stepT of [0.5, 0.9, 1.4, 2.0]) {
+                  const rlx = nlx + (wox / wl) * c.dx * stepT + (treeRng() - 0.5) * c.dx * 0.5;
+                  const rlz = nlz + (woz / wl) * c.dz * stepT + (treeRng() - 0.5) * c.dz * 0.5;
+                  const ry = islandHeight(rlx, rlz, isl);
+                  if (ry < -1.3 || ry > 0.2) continue;
+                  const sc = 0.75 + treeRng() * 0.6;
+                  _p.set(cx + rlx, Math.min(ry, -0.05), cz + rlz);
+                  _s.set(sc, sc * (0.85 + treeRng() * 0.35), sc);
+                  _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+                  _m.compose(_p, _q, _s);
+                  reedMats.push(_m.clone());
+                  reedBudget--;
+                  break;
+                }
+              }
+            }
           }
         }
       }
@@ -930,7 +979,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // shared assets must survive dispose
   for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
-  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo]) g.__shared = true;
+  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
 
   function makeInstanced(geo, mat, mats, depthMat = null) {
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(mats.length, 1));
@@ -1023,9 +1072,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
-    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = [];
+    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
-    grassBudget = 4500; slabBudget = 1300;
+    grassBudget = 4500; slabBudget = 1300; reedBudget = 900;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
@@ -1087,7 +1136,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     makeInstanced(boulderGeo, boulderMat, boulderMats);
     makeInstanced(slabGeo, boulderMat, slabMats);
     const grassMesh = makeInstanced(grassGeo, grassMat, grassMats);
-    grassMesh.castShadow = false;                     // tufts shade nothing; saves the shadow pass
+    grassMesh.castShadow = false;
+    const reedMesh = makeInstanced(reedGeo, grassMat, reedMats);
+    reedMesh.castShadow = false;                     // tufts shade nothing; saves the shadow pass
 
     // the REAL Utö: Finland's oldest lighthouse + pilot village — when in range
     const uto = activeSet.find((i) => i.name === 'Utö');

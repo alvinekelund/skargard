@@ -212,6 +212,30 @@ function smallSailboat(rng) {
   return g;
 }
 
+// the same yacht with her sails UP — heeled, drawing, actually sailing
+function sailingYacht(rng) {
+  const g = smallSailboat(rng);
+  const side = rng() < 0.5 ? 1 : -1;
+  const mkSail = (tackX, tackY, headX, headY, clewX, clewY, belly) => {
+    const s = new THREE.Shape();
+    s.moveTo(tackX, tackY); s.lineTo(headX, headY);
+    s.quadraticCurveTo((headX + clewX) / 2 + 0.25, (headY + clewY) / 2, clewX, clewY);
+    s.closePath();
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(s), M.sail);
+    m.rotation.y = Math.PI / 2;                        // shape XY → boat's z/x plane… rotate to fore-aft
+    m.rotation.z = 0;
+    return m;
+  };
+  // main: luff on the mast, foot along the boom; genoa from the stem head
+  const main = mkSail(-0.05, 1.25, 0.05, 7.0, -2.35, 1.3, 0.3);
+  main.position.set(0, 0, 0.1); main.rotation.y = Math.PI / 2 + side * 0.32;
+  const jib = mkSail(-0.05, 0.75, -0.1, 6.9, -2.0, 0.95, 0.4);
+  jib.position.set(0, 0, 2.05); jib.rotation.y = Math.PI / 2 + side * 0.42;
+  g.add(main, jib);
+  g.userData.heel = side * (0.1 + rng() * 0.14);       // 6–14° of press
+  return g;
+}
+
 function house(rng, big = false) {
   const g = new THREE.Group();
   const red = rng() < 0.75;
@@ -498,7 +522,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // ── small boats moored alongside the real piers — the guest harbours ──
   let moored = 0;
   for (const line of (region.piers || [])) {
-    if (moored >= 60) break;
+    if (moored >= 90) break;
     if (!line.some(([px2, pz2]) => heightAt(px2, pz2) > -1.6)) continue;   // same land test
     let best = null, bd = 0;                       // seaward pier end = deepest water
     for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
@@ -507,19 +531,23 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     let dx = px - line[0][0], dz = pz - line[0][1];
     const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
     const rx = dz, rz = -dx;                               // abeam the pier
-    const nBoats = 2 + Math.floor(rng() * 4);             // 2–5 berthed here — a real harbour
-    for (let k = 0; k < nBoats && moored < 60; k++) {
-      const along = 3 + k * 4.5, side = (k % 2 ? 1 : -1) * (2.6 + rng() * 0.8);
+    const nBoats = 4 + Math.floor(rng() * 4);             // 4–7 berthed — it's July out here
+    for (let k = 0; k < nBoats && moored < 90; k++) {
+      const along = 3 + k * 5.5, side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
       const r = rng();
       const b = r < 0.5 ? smallSailboat(rng) : r < 0.8 ? motorboat(rng) : rowboat(rng);
+      // guest-harbour boats are 6–12 m — comparable to the Swan, not dinghies
+      if (r < 0.5) b.scale.setScalar(1.35 + rng() * 0.75);        // yachts 8–12 m
+      else if (r < 0.8) b.scale.setScalar(1.15 + rng() * 0.55);   // cruisers 6–8.5 m
       if (rng() < 0.22) {                          // someone sitting aboard, pottering
         const sitter = person(rng, true);
         if (r < 0.5) sitter.position.set(0, -0.31, -1.15);        // yacht: in the cockpit
         else if (r < 0.8) sitter.position.set(0, -0.16, -0.72);   // motorboat: helm bench
         else sitter.position.set(0, -0.46, -0.45);                // skiff: on the thwart
         sitter.rotation.y = rng() < 0.7 ? 0 : Math.PI;
+        sitter.scale.multiplyScalar(1 / b.scale.x);               // the boat grew; people don't
         b.add(sitter);
       }
       b.position.set(bx, 0, bz);
@@ -581,18 +609,25 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     walkers++;
   }
 
-  // ── a few small boats puttering around the region's open water —
-  //    each with someone actually at the helm ──
-  for (let n = 0; n < 3; n++) {
-    const ang = rng() * Math.PI * 2, dist = 250 + rng() * 650;
+  // ── summer traffic on the water: motorboats puttering with someone at the
+  //    helm, and yachts actually SAILING — heeled, drawing, on their own
+  //    courses. Densest where people actually are. ──
+  for (let n = 0; n < 6; n++) {
+    const ang = rng() * Math.PI * 2, dist = 250 + rng() * 900;
     const x = center.x + Math.sin(ang) * dist, z = center.y + Math.cos(ang) * dist;
     if (heightAt(x, z) > -2) continue;
-    const b = motorboat(rng);
+    const sailing = n >= 3;                        // half the fleet is under sail
+    const b = sailing ? sailingYacht(rng) : motorboat(rng);
+    if (sailing) b.scale.setScalar(1.3 + rng() * 0.7);   // 8–12 m cruisers
     const driver = person(rng, true);
-    driver.position.set(0, -0.14, -0.72);          // hips on the helm bench, hands to the wheel
+    driver.position.set(0, sailing ? -0.28 : -0.14, sailing ? -1.15 : -0.72);
+    driver.scale.multiplyScalar(1 / b.scale.x);
     b.add(driver);
     b.position.set(x, 0, z);
-    b.userData = { heading: rng() * Math.PI * 2, speed: 2.4 + rng() * 3.2, turn: 0, side: rng() < 0.5 ? 1 : -1, phase: rng() * 6.28 };
+    b.userData = {
+      heading: rng() * Math.PI * 2, speed: sailing ? 1.8 + rng() * 1.4 : 2.4 + rng() * 3.2,
+      turn: 0, side: rng() < 0.5 ? 1 : -1, phase: rng() * 6.28, heel: b.userData.heel || 0,
+    };
     b.rotation.y = b.userData.heading;
     group.add(b);
     dyn.smallCraft.push(b);
@@ -633,7 +668,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       b.position.z += Math.cos(u.heading) * u.speed * dt;
       b.position.y = (waveHeightAt ? waveHeightAt(b.position.x, b.position.z, t) : 0) * 0.85;
       b.rotation.y = u.heading;
-      b.rotation.z = Math.sin(t * 1.3 + u.phase) * 0.05 - u.turn * u.side * 0.15;
+      b.rotation.z = (u.heel || 0) + Math.sin(t * 1.3 + u.phase) * 0.05 - u.turn * u.side * 0.15;
     }
     for (const cv of dyn.cars) {                     // drive the road, turn at the ends
       const u = cv.userData;

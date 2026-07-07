@@ -48,8 +48,20 @@ function shipBlock(l, b, h, mat, taper = 0.16, sternRound = 0.12) {
   return new THREE.Mesh(geo, mat);
 }
 
-// a Baltic cruise ferry (Viking Line / Silja Line), ~170 m — a real silhouette:
-// shaped hull, tiered superstructure with lit window rows, lifeboats, funnel
+/* ── SCALE AUDIT — real vessels, real LOA. The Swan 36 is 11 m; a Baltic
+   cruise ferry alongside her must feel like a moving building.
+     Viking Glory      222 m LOA · 35 m beam · superstructure to ~50 m
+     Silja Serenade    203 m LOA · 32 m beam · white hull, blue band
+     road ferry lossi   50 m
+     Utö connection     27 m
+     guest-harbour yachts/cruisers 6–12 m (comparable to the Swan)          ── */
+const FERRY_DIMS = {
+  viking: { L: 222, B: 35 },   // Viking Glory, Turku–Åland–Stockholm
+  silja: { L: 203, B: 32 },    // Silja Serenade class
+};
+
+// a Baltic cruise ferry (Viking Line / Silja Line) at TRUE scale — shaped
+// hull, six lit passenger decks, lifeboats, twin funnels
 function cruiseFerry(scheme) {
   const g = new THREE.Group();
   const viking = scheme === 'viking';
@@ -61,19 +73,23 @@ function cruiseFerry(scheme) {
   const glass = new THREE.MeshStandardMaterial({ color: 0x2b333d, roughness: 0.25, metalness: 0.2, emissive: 0xffca7a, emissiveIntensity: 0.55 });
   const orange = new THREE.MeshStandardMaterial({ color: 0xe8631c, roughness: 0.6 });
 
-  const L = 170, B = 27, Hh = 9.5, draft = 4.2;
+  const { L, B } = FERRY_DIMS[scheme];
+  const Hh = 12, draft = 6.5;
   const hull = shipBlock(L, B, Hh + draft, hullMat);
   hull.position.y = -draft;
-  const bootStripe = shipBlock(L * 1.002, B + 0.3, 1.0, boot);   // dark band at the waterline
+  const bootStripe = shipBlock(L * 1.002, B + 0.3, 1.2, boot);   // dark band at the waterline
   bootStripe.position.y = 0.15;
   g.add(hull, bootStripe);
 
-  // superstructure: four inset tiers with rounded fronts + lit window rows
+  // superstructure: six inset tiers with rounded fronts + lit window rows —
+  // ~50 m from the waterline to the top deck, like the real ships
   const tiers = [
-    { l: L * 0.94, b: B - 1.5, h: 6.0 },
-    { l: L * 0.88, b: B - 3.0, h: 5.5 },
-    { l: L * 0.74, b: B - 7.0, h: 5.0 },
-    { l: L * 0.46, b: B - 13, h: 4.2 },
+    { l: L * 0.95, b: B - 1.5, h: 6.6 },
+    { l: L * 0.92, b: B - 2.5, h: 6.2 },
+    { l: L * 0.86, b: B - 4.0, h: 6.0 },
+    { l: L * 0.76, b: B - 7.0, h: 5.8 },
+    { l: L * 0.6, b: B - 11, h: 5.4 },
+    { l: L * 0.4, b: B - 16, h: 4.8 },
   ];
   let y = Hh;
   for (let i = 0; i < tiers.length; i++) {
@@ -91,22 +107,22 @@ function cruiseFerry(scheme) {
     y += t.h;
   }
   // lifeboats slung along the boat deck (orange, both sides)
-  for (const s of [1, -1]) for (let k = 0; k < 6; k++) {
-    const lb = new THREE.Mesh(new THREE.CapsuleGeometry(0.9, 4.2, 3, 6), orange);
+  for (const s of [1, -1]) for (let k = 0; k < 8; k++) {
+    const lb = new THREE.Mesh(new THREE.CapsuleGeometry(1.1, 5.4, 3, 6), orange);
     lb.rotation.z = Math.PI / 2;
-    lb.position.set(L * 0.24 - k * 9, Hh + 5.5, s * (B / 2 - 0.6));
+    lb.position.set(L * 0.26 - k * 11, Hh + 13.5, s * (B / 2 - 0.7));
     g.add(lb);
   }
   // two funnels (line colours) with black tops, set aft
-  for (const fx of [-L * 0.20, -L * 0.30]) {
-    const fn = shipBlock(11, 6, 9, accent, 0.2);
+  for (const fx of [-L * 0.20, -L * 0.32]) {
+    const fn = shipBlock(14, 7.5, 11, accent, 0.2);
     fn.position.set(fx, y, 0);
-    const cap = box(9, 1.6, 5, fx - 0.5, y + 9, 0, dark);
+    const cap = box(11.5, 1.8, 6.2, fx - 0.5, y + 11, 0, dark);
     g.add(fn, cap);
   }
   // foremast + radar
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 14, 6), dark);
-  mast.position.set(L * 0.28, Hh + 13, 0);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 16, 6), dark);
+  mast.position.set(L * 0.3, Hh + 16, 0);
   g.add(mast);
   return g;
 }
@@ -240,8 +256,8 @@ export function createShips(scene) {
     ships.push({ mesh, route, seg, total, speed, s: startFrac * total, dir, yaw: 0, init: false, fixedYaw, kind });
   }
 
-  addShip(cruiseFerry('viking'), ROUTES.viking, 9.0, 0.25, 1, false, 'viking');
-  addShip(cruiseFerry('silja'), ROUTES.silja, 9.0, 0.7, -1, false, 'silja');
+  addShip(cruiseFerry('viking'), ROUTES.viking, 10.2, 0.25, 1, false, 'viking');   // ~20 kn service speed
+  addShip(cruiseFerry('silja'), ROUTES.silja, 9.8, 0.7, -1, false, 'silja');
   addShip(roadFerry(), ROUTES.roadferry, 3.0, 0.4, 1, true, 'roadferry');  // a lossi never turns around
   addShip(connectionVessel(), ROUTES.utoline, 5.0, 0.55, 1, false, 'utoline');
 
