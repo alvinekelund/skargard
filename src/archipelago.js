@@ -384,7 +384,11 @@ function islandHeight(lx, lz, isl) {
     // mesa with cliff walls (which is what this used to draw)
     const rise = THREE.MathUtils.clamp(isl.H * 5, 18, 130);
     const shore = THREE.MathUtils.smoothstep(s, 0, rise);
-    h = Math.max(gridH(isl.grid, lx, lz) * shore, dome * 0.9); // land stays above water
+    const gh = gridH(isl.grid, lx, lz);
+    // glacial hummocks between the 25 m+ DEM nodes — the bilinear alone reads
+    // pancake-smooth; amplitude rides the local height so shores stay gentle
+    const hum = fbm((lx + cx) * 0.026, (lz + cz) * 0.026, 2) * Math.min(gh, 9) * 0.4 * shore;
+    h = Math.max(gh * shore + hum, dome * 0.9);               // land stays above water
   } else {
     h = dome * isl.H;
   }
@@ -421,6 +425,27 @@ function coverAt(isl, lx, lz) {
   const ix = Math.round((lx - c.x0) / c.dx), iz = Math.round((lz - c.z0) / c.dz);
   if (ix < 0 || iz < 0 || ix >= c.nx || iz >= c.nz) return 0;
   return c._v[iz * c.nx + ix];
+}
+
+// forest test with edge dilation: a node whose 8-neighbourhood is mostly
+// canopy counts as forest too, so the photo's woods read as continuous
+// forest from the water instead of pin-pricked speckle
+function forestAt(isl, lx, lz) {
+  const c = isl.cover;
+  if (!c) return false;
+  if (c.d !== undefined) return c.d === 1;
+  if (!c._v) c._v = Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0));
+  const ix = Math.round((lx - c.x0) / c.dx), iz = Math.round((lz - c.z0) / c.dz);
+  if (ix < 0 || iz < 0 || ix >= c.nx || iz >= c.nz) return false;
+  if (c._v[iz * c.nx + ix] === 1) return true;
+  let votes = 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dz) continue;
+    const jx = ix + dx, jz = iz + dz;
+    if (jx < 0 || jz < 0 || jx >= c.nx || jz >= c.nz) continue;
+    if (c._v[jz * c.nx + jx] === 1) votes++;
+  }
+  return votes >= 4;
 }
 
 // is a world point inside any of the land-cover entries ({p: ring, minX..maxZ})?
@@ -637,8 +662,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
-  let treeBudget = 6500;
-  let grassBudget = 4500, slabBudget = 1300, reedBudget = 900;
+  let treeBudget = 14000;
+  let grassBudget = 6000, slabBudget = 1300, reedBudget = 900;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
@@ -727,6 +752,41 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     const bw = bbox.maxX - bbox.minX, bd = bbox.maxZ - bbox.minZ;
     const samp = () => [bbox.minX + treeRng() * bw, bbox.minZ + treeRng() * bd];
 
+    // On the big islands, uniform sampling drowns the tree budget in an
+    // interior nobody can see from a boat — the whole visual weight of a
+    // forested island is its first ~350 m of shoreline. So big islands
+    // spend their trees in a shore band, edge-length-weighted along the
+    // real OSM ring (the interior keeps its painted canopy tint).
+    const ring = isl.ring;
+    let sampShore = null;
+    if (isl.A > 3e6) {
+      // only the ring edges inside the build radius count — a 60 km coastline
+      // would otherwise dilute the trees onto shores no one is near
+      const edges = [];
+      let total = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], q = ring[(i + 1) % ring.length];
+        const mx = cx + (a[0] + q[0]) / 2, mz = cz + (a[1] + q[1]) / 2;
+        if (Math.abs(mx - activeCenter.x) > RBUILD + 400 || Math.abs(mz - activeCenter.y) > RBUILD + 400) continue;
+        total += Math.hypot(q[0] - a[0], q[1] - a[1]);
+        edges.push([a, q, total]);
+      }
+      if (edges.length) sampShore = () => {
+        const u = treeRng() * total;
+        let lo = 0, hi = edges.length - 1;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (edges[mid][2] < u) lo = mid + 1; else hi = mid; }
+        const [a, b2] = edges[lo];
+        const t = treeRng();
+        const x = a[0] + (b2[0] - a[0]) * t, z = a[1] + (b2[1] - a[1]) * t;
+        let nx = -(b2[1] - a[1]), nz = b2[0] - a[0];
+        const L = Math.hypot(nx, nz) || 1; nx /= L; nz /= L;
+        // ring winding is unknown — probe which side is land
+        if (islandHeight(x + nx * 22, z + nz * 22, isl) < islandHeight(x - nx * 22, z - nz * 22, isl)) { nx = -nx; nz = -nz; }
+        const d = 14 + treeRng() * treeRng() * 336;   // biased toward the waterline
+        return [x + nx * d, z + nz * d, d];
+      };
+    }
+
     // ONLY proper forested islands carry trees. Small skerries are bare granite
     // with at most a little juniper scrub — never trees (that's the un-Finnish tell).
     // When the island has a SATELLITE cover grid, the photo decides instead:
@@ -736,22 +796,47 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     const hasHeath = isl._heath && isl._heath.length > 0;
     const satGrid = !!(isl.cover && isl.cover.b64);
     const satForest = satGrid || (isl.cover && isl.cover.d === 1);
+    // how forested the photo says this island is overall. The z14 classifier
+    // under-calls dark pine (reads it heath / leaves it unclassified), so on
+    // an island that is clearly forested we let those pixels carry trees too —
+    // while genuinely open islands (Jurmo's moraine heath) stay bare.
+    if (satGrid && isl._forestShare === undefined) {
+      const c = isl.cover;
+      if (!c._v) c._v = Uint8Array.from(atob(c.b64), (ch) => ch.charCodeAt(0));
+      let f = 0, land = 0;
+      for (let k = 0; k < c._v.length; k++) { const v = c._v[k]; if (v > 0) { land++; if (v === 1) f++; } }
+      isl._forestShare = land ? f / land : 0;
+    }
     if (isl.cover ? satForest : (kind === 'forest' || hasWood)) {
-      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.005 : 0.004)) + (satGrid || hasWood ? 220 : 0), 900, treeBudget);
+      // base bonus scales with area: a flat constant times 50 skerries used
+      // to drain the whole region budget before the main island's turn
+      const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.012), 260) : 0;
+      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.009 : 0.006)) + base, 2600, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
         tries++;
-        const [lx, lz] = samp();
+        const sp = sampShore ? sampShore() : samp();
+        const [lx, lz] = sp;
         const y = islandHeight(lx, lz, isl);
-        if (y < 0.9 || y > H + 1.0) continue;
-        if (satGrid) {                             // the PHOTO decides
-          if (coverAt(isl, lx, lz) !== 1) continue;
+        // shore-band samples know their true distance to the waterline, and on
+        // the big DEM islands the ramp is so gentle that a height cutoff would
+        // strip the first 100 m of coast bare — pines grow to the rock's edge
+        if (sp[2] !== undefined ? (y < 0.12 || y > H + 4.0) : (y < 0.9 || y > H + 4.0)) continue;
+        if (satGrid) {                             // the PHOTO decides (dilated)
+          if (!forestAt(isl, lx, lz)) {
+            // classifier bias correction on demonstrably forested islands:
+            // its 'heath' and unclassified pixels there are mostly dark pine
+            const cl = coverAt(isl, lx, lz);
+            const share = isl._forestShare;
+            if (!(share > 0.22 && (cl === 4 || cl === 0) && treeRng() < (cl === 4 ? 0.65 : 0.4))) continue;
+          }
         } else if (hasWood) {                      // else the OSM forest boundary
           if (!inCover(isl._wood, cx + lx, cz + lz)) continue;
         } else if (hasHeath) {
           if (inCover(isl._heath, cx + lx, cz + lz)) continue; // mapped heath stays treeless
         }
+        if (nearRoad(cx + lx, cz + lz)) continue;  // keep the gravel cut open
         const e = 0.6;
         const dy = Math.hypot(
           islandHeight(lx+e,lz,isl) - islandHeight(lx-e,lz,isl),
@@ -782,6 +867,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const y = islandHeight(lx, lz, isl);
       if (y < 0.3 || y > H + 0.4) continue;
       if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl === 1 || cl === 2) continue; }
+      if (nearRoad(cx + lx, cz + lz)) continue;
       const sc = 0.7 + treeRng() * 1.1;
       _p.set(cx + lx, y - 0.06, cz + lz);
       _s.set(sc, sc * (0.7 + treeRng() * 0.5), sc);
@@ -801,6 +887,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const y = islandHeight(lx, lz, isl);
       if (y < 0.15 || y > H + 0.3) continue;
       if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl !== 3 && cl !== 4 && treeRng() < 0.75) continue; }
+      if (nearRoad(cx + lx, cz + lz)) continue;
       const sc = 0.5 + treeRng() * 1.6;
       _p.set(cx + lx, y - 0.1, cz + lz);
       _s.set(sc * (0.8 + treeRng() * 0.5), sc * (0.6 + treeRng() * 0.4), sc * (0.8 + treeRng() * 0.5));
@@ -996,9 +1083,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // (the chart draws some islands smaller than the road network knows them).
   function buildRoadMesh(regionRoads) {
     const pos = [], col = [], idx = [];
-    const cMajor = new THREE.Color(0x8d8474), cMinor = new THREE.Color(0x7d7160);
+    // pale sandy gravel — Finnish archipelago roads are light cuts that
+    // read clearly against forest and granite, not asphalt-grey camouflage
+    const cMajor = new THREE.Color(0xbfb090), cMinor = new THREE.Color(0xab9d80);
     for (const rd of regionRoads) {
-      const hw = rd.c === 1 ? 1.9 : 1.25;
+      const hw = rd.c === 1 ? 2.6 : 1.7;
       const cc = rd.c === 1 ? cMajor : cMinor;
       // a road lives on one island (occasionally two) — probe only those,
       // not every island in the region, or draping costs seconds at Nauvo
@@ -1043,7 +1132,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
           const y = hAt(x, z);
           if (y < 0.25) { flush(); continue; }
-          run.push([x, y + 0.14, z]);
+          run.push([x, y + 0.2, z]);
         }
       }
       flush();
@@ -1059,10 +1148,34 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     return mesh;
   }
   const roadMat = new THREE.MeshStandardMaterial({
-    vertexColors: true, roughness: 0.96, metalness: 0,
+    vertexColors: true, roughness: 0.93, metalness: 0,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   roadMat.__shared = true;
+
+  // 8 m world-cell hash of the region's road lines — trees keep off the
+  // carriageway (plus a verge), which is also what makes a road visible
+  // from the water: a pale gravel cut through the forest
+  const roadHash = new Set();
+  const roadCell = (x, z) => Math.floor(x / 8) + ',' + Math.floor(z / 8);
+  function hashRoads(regionRoads) {
+    roadHash.clear();
+    for (const rd of regionRoads) {
+      for (let i = 0; i < rd.p.length - 1; i++) {
+        const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
+        const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / 7));
+        for (let s = 0; s <= n; s++)
+          roadHash.add(roadCell(x1 + (x2 - x1) * s / n, z1 + (z2 - z1) * s / n));
+      }
+    }
+  }
+  function nearRoad(x, z) {
+    if (!roadHash.size) return false;
+    const cx = Math.floor(x / 8), cz = Math.floor(z / 8);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+      if (roadHash.has((cx + dx) + ',' + (cz + dz))) return true;
+    return false;
+  }
 
   // ── TIME-SLICED region builds: the per-island geometry work (the expensive
   //    part — seconds in the dense Nauvo interior) is spread across frames
@@ -1073,8 +1186,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
-    treeBudget = 6500;                    // region-wide cap: near islands (sorted first) win
-    grassBudget = 4500; slabBudget = 1300; reedBudget = 900;
+    treeBudget = 14000;                   // region-wide cap: near islands (sorted first) win
+    grassBudget = 6000; slabBudget = 1300; reedBudget = 900;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
@@ -1085,8 +1198,15 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const dz = Math.max(Math.abs(i.z - cz0) - (i.bbox.maxZ - i.bbox.minZ) / 2, 0);
       if (dx < RBUILD && dz < RBUILD) set.push(i);
     }
-    set.sort((a, b) =>
-      ((a.x - cx0) ** 2 + (a.z - cz0) ** 2) - ((b.x - cx0) ** 2 + (b.z - cz0) ** 2));
+    // nearest first BY EDGE, not centroid — the big island whose shore you're
+    // moored at must win the scatter budgets, not queue behind 50 skerries
+    // because its centroid is kilometres inland
+    const edge2 = (i) => {
+      const dx = Math.max(i.x + i.bbox.minX - cx0, cx0 - (i.x + i.bbox.maxX), 0);
+      const dz = Math.max(i.z + i.bbox.minZ - cz0, cz0 - (i.z + i.bbox.maxZ), 0);
+      return dx * dx + dz * dz;
+    };
+    set.sort((a, b) => edge2(a) - edge2(b));
     if (set.length > MAX_ISLANDS) set = set.slice(0, MAX_ISLANDS);
 
     for (const isl of set) {
@@ -1101,7 +1221,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         else if (n.c === 2) isl._scrub.push(n);
       }
     }
-    job = { set, i: 0, cx0, cz0, t0: performance.now() };
+    // roads intersecting the region — needed BEFORE island scatter so trees
+    // keep off the carriageways. Nearest-first, capped, like everything else.
+    const regionRoads = roads
+      .filter((r) => r.maxX > cx0 - RBUILD && r.minX < cx0 + RBUILD && r.maxZ > cz0 - RBUILD && r.minZ < cz0 + RBUILD)
+      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
+                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
+      .slice(0, 260);
+    hashRoads(regionRoads);
+
+    job = { set, i: 0, cx0, cz0, t0: performance.now(), regionRoads };
     stepRebuild(40);                      // a generous first slice: teleports feel instant
   }
 
@@ -1115,7 +1244,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   function finalizeRebuild() {
-    const { set, cx0, cz0, t0 } = job;
+    const { set, cx0, cz0, t0, regionRoads } = job;
     job = null;
     disposeActive();                      // the old region leaves only now
     activeSet = set;
@@ -1170,13 +1299,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     // life: buoys marking channels, harbours, cottages, traffic, gulls, Utö extras
     const RB = RBUILD;
     const inBox = (x, z) => Math.abs(x - cx0) < RB && Math.abs(z - cz0) < RB;
-    // roads intersecting the region: rendered as terrain ribbons + given to
-    // props for the cars. Nearest-first, capped, like everything else.
-    const regionRoads = roads
-      .filter((r) => r.maxX > cx0 - RB && r.minX < cx0 + RB && r.maxZ > cz0 - RB && r.minZ < cz0 + RB)
-      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
-                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
-      .slice(0, 260);
+    // roads were selected up-front in rebuild() (the scatter needed them);
+    // here they become the terrain ribbons + the cars' routes
     const roadMesh = buildRoadMesh(regionRoads);
     if (roadMesh) activeGroup.add(roadMesh);
 
