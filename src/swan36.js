@@ -357,11 +357,11 @@ export function buildSwan36({ withSails = true } = {}) {
   if (withSails) {
     const main = sailMesh(V2(1.66, 2.14), V2(1.66, 14.30),   // tack, head on mast
                           V2(-1.78, 2.14), V2(-0.90, 8.50),  // clew at boom end, roached leech
-                          0.18, 0.0);
+                          0.40, 0.0);                        // ~11% draft — a powered-up reaching belly
     main.name = 'mainsail';
     const jib = sailMesh(V2(5.30, 1.18), V2(1.70, 14.40),    // tack at stem, head at masthead
                          V2(0.55, 1.55), V2(1.45, 8.10),     // clew, slightly hollow leech
-                         0.30, 1.7);                         // de-synced so they never flog in lockstep
+                         0.50, 1.7);                         // ~12% draft, de-synced flog phase
     jib.name = 'genoa';
     sails.add(main, jib);
   }

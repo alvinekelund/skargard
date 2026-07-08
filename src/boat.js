@@ -68,9 +68,10 @@ export function createBoat(scene) {
   const sailPivot = new THREE.Group();
   sailPivot.position.set(MAST_X, 0, 0);
   swan.add(sailPivot);
+  let mainsailMesh = null;
   for (const name of ['boom', 'mainsail', 'boomGear']) {
     const o = swan.getObjectByName(name);
-    if (o) { o.parent.remove(o); o.position.x -= MAST_X; sailPivot.add(o); }
+    if (o) { o.parent.remove(o); o.position.x -= MAST_X; sailPivot.add(o); if (name === 'mainsail') mainsailMesh = o; }
   }
   // the genoa sets on the LEEWARD side and swings clew-across in every tack /
   // gybe. It rotates around the FORESTAY (tack at the stem → head at the
@@ -286,6 +287,14 @@ export function createBoat(scene) {
       if (s2.t > 0.8) state.shudder = null;
     }
     sailPivot.rotation.y += state.flap * 0.03 * Math.sin(t * 26);  // whole-rig tremble
+
+    // mirror the main's belly onto the leeward face (same as the genoa) so the
+    // sail bellies to leeward on BOTH tacks instead of caving to windward on one
+    if (mainsailMesh) {
+      let mz = mainsailMesh.scale.z + (-side - mainsailMesh.scale.z) * (1 - Math.exp(-4.2 * dt));
+      if (Math.abs(mz) < 0.12) mz = (side >= 0 ? -1 : 1) * 0.12;    // never fully collapse
+      mainsailMesh.scale.z = mz;
+    }
 
     // the genoa swings clew-across on every tack/gybe: rotate it around the
     // forestay toward the new leeward side (fast in a gybe), flap it flat while
