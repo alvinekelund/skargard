@@ -1271,7 +1271,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // Samples every ~12 m; runs break where the road would dip underwater
   // (the chart draws some islands smaller than the road network knows them).
   function buildRoadMesh(regionRoads) {
-    const pos = [], col = [], idx = [];
+    const pos = [], col = [], idx = [], bridges = [];
     // pale sandy gravel — Finnish archipelago roads are light cuts that
     // read clearly against forest and granite, not asphalt-grey camouflage
     const cMajor = new THREE.Color(0xbfb090), cMinor = new THREE.Color(0xab9d80);
@@ -1312,6 +1312,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         }
         run = [];
       };
+      // where the road leaves land, crosses water, and lands again is a BRIDGE
+      let lastLand = null, crossed = false;
       for (let i = 0; i < rd.p.length - 1; i++) {
         const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
         const segL = Math.hypot(x2 - x1, z2 - z1);
@@ -1320,20 +1322,92 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const t = s2 / steps;
           const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
           const y = hAt(x, z);
-          if (y < 0.25) { flush(); continue; }
+          if (y < 0.25) { flush(); crossed = true; continue; }   // over water
+          if (crossed && lastLand) {
+            const gap = Math.hypot(x - lastLand[0], z - lastLand[2]);
+            if (gap > 12 && gap < 620) bridges.push({ a: lastLand, b: [x, y, z], hw });  // a real span
+            crossed = false;
+          }
           run.push([x, y + 0.2, z]);
+          lastLand = [x, y, z];
         }
       }
       flush();
     }
-    if (!idx.length) return null;
+    const grp = new THREE.Group();
+    if (idx.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, roadMat);
+      mesh.receiveShadow = true;
+      grp.add(mesh);
+    }
+    const bmesh = buildBridges(bridges);
+    if (bmesh) grp.add(bmesh);
+    return grp.children.length ? grp : null;
+  }
+
+  // realistic bridges where the roads span sounds: a gently arched concrete
+  // deck on piers, with railings — clearance scaled to the span so small boats
+  // pass under. Deck/pier grey, rails darker; one merged vertex-coloured mesh.
+  const CB_DECK = new THREE.Color(0x9d9a92), CB_PIER = new THREE.Color(0x8b877e), CB_RAIL = new THREE.Color(0x54514b);
+  function buildBridges(bridges) {
+    if (!bridges.length) return null;
+    const p = [], c = [], ix = [];
+    const quad = (ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, col) => {
+      const b0 = p.length / 3;
+      p.push(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz);
+      for (let k = 0; k < 4; k++) c.push(col.r, col.g, col.b);
+      ix.push(b0, b0 + 1, b0 + 2, b0, b0 + 2, b0 + 3);
+    };
+    const boxCol = (x0, y0, z0, sx, sy, sz, col) => {           // small pier box
+      const b0 = p.length / 3;
+      const xs = [-sx / 2, sx / 2], ys = [0, sy], zs = [-sz / 2, sz / 2];
+      for (const yy of ys) for (const zz of zs) for (const xx of xs) p.push(x0 + xx, y0 + yy, z0 + zz);
+      for (let k = 0; k < 8; k++) c.push(col.r, col.g, col.b);
+      const f = [[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]];
+      for (const [a, b, d, e] of f) ix.push(b0 + a, b0 + b, b0 + d, b0 + a, b0 + d, b0 + e);
+    };
+    for (const br of bridges) {
+      const ax = br.a[0], az = br.a[2], bx = br.b[0], bz = br.b[2];
+      const len = Math.hypot(bx - ax, bz - az);
+      let dx = (bx - ax) / len, dz = (bz - az) / len;
+      const px = -dz, pz = dx;                                   // perpendicular
+      const hw = (br.hw + 0.7);                                  // deck half-width
+      const clr = Math.min(3.5 + len * 0.02, 11);               // navigable clearance
+      const N = Math.max(4, Math.round(len / 10));
+      const y0 = br.a[1] + 0.2, y1 = br.b[1] + 0.2;
+      const yat = (t) => y0 + (y1 - y0) * t + Math.sin(Math.PI * t) * clr;   // arch
+      let prev = null;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, x = ax + dx * len * t, z = az + dz * len * t, y = yat(t);
+        const cur = { lx: x + px * hw, lz: z + pz * hw, rx: x - px * hw, rz: z - pz * hw, y };
+        if (prev) {
+          quad(prev.lx, prev.y, prev.lz, cur.lx, cur.y, cur.lz, cur.rx, cur.y, cur.rz, prev.rx, prev.y, prev.rz, CB_DECK);
+          for (const sgn of [1, -1]) {                          // railings
+            const ex = sgn > 0 ? 'l' : 'r';
+            const p0x = prev[ex + 'x'], p0z = prev[ex + 'z'], c0x = cur[ex + 'x'], c0z = cur[ex + 'z'];
+            quad(p0x, prev.y, p0z, c0x, cur.y, c0z, c0x, cur.y + 0.8, c0z, p0x, prev.y + 0.8, p0z, CB_RAIL);
+          }
+        }
+        prev = cur;
+      }
+      const piers = Math.max(1, Math.round(len / 55));           // piers into the water
+      for (let k = 1; k <= piers; k++) {
+        const t = k / (piers + 1), x = ax + dx * len * t, z = az + dz * len * t;
+        boxCol(x, -2, z, 2.4, yat(t) + 2, 2.4, CB_PIER);
+      }
+    }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    geo.setIndex(idx);
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+    geo.setIndex(ix);
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, roadMat);
-    mesh.receiveShadow = true;
+    mesh.castShadow = true; mesh.receiveShadow = true;
     return mesh;
   }
   const roadMat = new THREE.MeshStandardMaterial({
