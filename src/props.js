@@ -469,7 +469,9 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     // a timber barn/warehouse, never a pastel apartment block in a village.
     if (cls === 0 && foot > 240 && inCity(bx, bz)) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
-      const floors = Math.max(2, Math.min(7, Math.round(Math.sqrt(foot) / 6.4)));
+      // vary storeys per building (not just by footprint) so the waterfront
+      // skyline undulates 4–8 floors instead of every block maxing at a flat 7
+      const floors = Math.max(3, Math.min(8, Math.round(Math.sqrt(foot) / 6.9 + (rngU() - 0.4) * 2.4)));
       const fh = 3.2, bh = floors * fh;                  // storey height, body height
       const along = bw >= bd ? bw : bd;                  // long axis
       const uplace = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
