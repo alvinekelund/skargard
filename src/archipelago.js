@@ -952,7 +952,12 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         const streak = fbm((lx + cx) * 0.3, (lz + cz) * 0.04, 2) * 0.5 + 0.5; // glaciated striae
         tmp.copy(COL.granite).lerp(COL.pink, grain * 0.6);
         tmp.lerp(COL.grey, THREE.MathUtils.smoothstep(streak, 0.55, 0.85) * 0.45);
-        tmp.lerp(COL.lichen, THREE.MathUtils.smoothstep(patch, 0.62, 0.88) * THREE.MathUtils.clamp(slope, 0, 1) * 0.4);
+        // orange lichen (Xanthoria) mottles the sunlit granite tops...
+        tmp.lerp(COL.lichen, THREE.MathUtils.smoothstep(patch, 0.55, 0.85) * THREE.MathUtils.clamp(slope, 0, 1) * 0.52);
+        // ...and blazes in a splash-zone band just above the waterline — the
+        // single most recognisable mark of a real Archipelago Sea skerry
+        const band = THREE.MathUtils.smoothstep(y, 0.42, 0.8) * (1 - THREE.MathUtils.smoothstep(y, 1.6, 3.2));
+        tmp.lerp(COL.lichen, band * (0.28 + 0.46 * patch) * (0.5 + 0.5 * grain));
         const bloom = fbm((lx + cx) * 0.22, (lz + cz) * 0.22, 3) * 0.5 + 0.5;
         if (cover === 1) {
           // mapped forest: mossy floor + humus, rock pokes through on steep faces
