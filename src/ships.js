@@ -375,8 +375,8 @@ export function createShips(scene) {
     scene.add(mesh);
     ships.push({ mesh, berthed: true, bx: x, bz: z, yaw, kind });
   }
-  addBerth(cruiseFerry('viking'), 194980, -40570, 1.57, 'viking-berth');   // Katajanokka
-  addBerth(cruiseFerry('silja'), 194270, -39710, 0.4, 'silja-berth');      // Olympia Terminal
+  addBerth(cruiseFerry('viking'), 194840, -39820, 1.74, 'viking-berth');   // S side of Katajanokka
+  addBerth(cruiseFerry('silja'), 194270, -39710, 0.4, 'silja-berth');      // Olympia Terminal (opposite)
   addBerth(cruiseFerry('tallink'), 191610, -38560, 2.36, 'tallink-berth'); // Länsiterminaali
 
   function posAt(ship, s) {
