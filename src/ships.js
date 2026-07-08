@@ -131,6 +131,7 @@ function hullLettering(g, text, color, len, hgt, x, y, halfB) {
 const FERRY_DIMS = {
   viking: { L: 222, B: 35 },   // Viking Glory, Turku–Åland–Stockholm
   silja: { L: 203, B: 32 },    // Silja Serenade class
+  tallink: { L: 212, B: 31 },  // Tallink Megastar / Baltic Princess, Helsinki–Tallinn
 };
 
 // a Baltic cruise ferry at TRUE scale, built to be recognised, not just seen:
@@ -200,6 +201,8 @@ function cruiseFerry(scheme) {
   // hull; Serenade blue on the tall white hull — spanning two deck heights.
   if (viking) {
     hullLettering(g, 'VIKING LINE', '#f4f6f8', L * 0.55, 6.2, -L * 0.02, Hh * 0.5, B / 2 + 0.2);
+  } else if (scheme === 'tallink') {
+    hullLettering(g, 'TALLINK', '#d1232a', L * 0.42, 7.5, -L * 0.02, Hh * 0.62, B / 2 + 0.2);
   } else {
     hullLettering(g, 'SILJA LINE', '#1c3f94', L * 0.6, 7.5, -L * 0.02, Hh * 0.62, B / 2 + 0.2);
   }
@@ -358,6 +361,24 @@ export function createShips(scene) {
   addShip(roadFerry(), ROUTES.roadferry, 3.0, 0.4, 1, true, 'roadferry');  // a lossi never turns around
   addShip(connectionVessel(), ROUTES.utoline, 5.0, 0.55, 1, false, 'utoline');
 
+  // BERTHED ferries at their real Helsinki terminals: a Viking Line ship at
+  // Katajanokka, a Silja Line ship at the Olympia Terminal (South Harbour), a
+  // Tallink ship at the West Terminal in Länsisatama. Moored (no motion), just
+  // a gentle harbour bob.
+  function addBerth(model, x, z, yaw, kind) {
+    model.rotation.y = -Math.PI / 2;                 // bow +X → +Z
+    const mesh = new THREE.Group();
+    mesh.add(model);
+    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+    mesh.position.set(x, 0, z);
+    mesh.rotation.y = yaw;
+    scene.add(mesh);
+    ships.push({ mesh, berthed: true, bx: x, bz: z, yaw, kind });
+  }
+  addBerth(cruiseFerry('viking'), 194980, -40570, 1.57, 'viking-berth');   // Katajanokka
+  addBerth(cruiseFerry('silja'), 194270, -39710, 0.4, 'silja-berth');      // Olympia Terminal
+  addBerth(cruiseFerry('tallink'), 191610, -38560, 2.36, 'tallink-berth'); // Länsiterminaali
+
   function posAt(ship, s) {
     let acc = 0;
     for (let i = 0; i < ship.seg.length; i++) {
@@ -374,6 +395,10 @@ export function createShips(scene) {
 
   function update(dt, t, waveHeightAt) {
     for (const sh of ships) {
+      if (sh.berthed) {                              // moored — hold station, gentle bob
+        sh.mesh.position.y = waveHeightAt ? waveHeightAt(sh.bx, sh.bz, t) * 0.15 : 0;
+        continue;
+      }
       sh.s += sh.speed * sh.dir * dt;
       if (sh.s > sh.total) { sh.s = sh.total; sh.dir = -1; }
       if (sh.s < 0) { sh.s = 0; sh.dir = 1; }
