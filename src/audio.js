@@ -123,14 +123,109 @@ export function buildBeds(ctx, dest) {
   wash.connect(washBp); washBp.connect(washG); washG.connect(dest);
   wash.start();
 
-  return { whiteBuf, washGain: washG };
+  // wind in the rig: a broad breathy layer that firms up with the breeze, with
+  // a faint higher whistle over it — the sound of air over shrouds and sails.
+  // Silent-ish at calm, never a gale. Driven by setWind().
+  const wind = ctx.createBufferSource();
+  wind.buffer = pinkBuf; wind.loop = true;
+  const windBp = ctx.createBiquadFilter();
+  windBp.type = 'bandpass'; windBp.frequency.value = 420; windBp.Q.value = 0.5;
+  const windG = ctx.createGain(); windG.gain.value = 0.0;
+  wind.connect(windBp); windBp.connect(windG); windG.connect(dest);
+  const whistle = ctx.createBufferSource();
+  whistle.buffer = whiteBuf; whistle.loop = true;
+  const whHp = ctx.createBiquadFilter();
+  whHp.type = 'bandpass'; whHp.frequency.value = 2400; whHp.Q.value = 1.1;
+  const whG = ctx.createGain(); whG.gain.value = 0.0;
+  whistle.connect(whHp); whHp.connect(whG); whG.connect(dest);
+  // gusty flutter on the wind gain so it isn't a flat hiss
+  const windLfo = ctx.createOscillator(); windLfo.frequency.value = 0.21;
+  const windLfoG = ctx.createGain(); windLfoG.gain.value = 0.01;
+  windLfo.connect(windLfoG); windLfoG.connect(windG.gain);
+  wind.start(); whistle.start(); windLfo.start();
+
+  // shore wash: a soft, slow surge of water on rock that rises as you close a
+  // shoreline — the sound that tells you land is near even with eyes shut
+  const shore = ctx.createBufferSource();
+  shore.buffer = pinkBuf; shore.loop = true;
+  const shoreBp = ctx.createBiquadFilter();
+  shoreBp.type = 'bandpass'; shoreBp.frequency.value = 300; shoreBp.Q.value = 0.6;
+  const shoreG = ctx.createGain(); shoreG.gain.value = 0.0;
+  shore.connect(shoreBp); shoreBp.connect(shoreG); shoreG.connect(dest);
+  const shoreLfo = ctx.createOscillator(); shoreLfo.frequency.value = 0.12;
+  const shoreLfoG = ctx.createGain(); shoreLfoG.gain.value = 0.5;   // deep swell in the surge
+  shoreLfo.connect(shoreLfoG); shoreLfoG.connect(shoreG.gain);
+  shore.start(); shoreLfo.start();
+
+  return { whiteBuf, washGain: washG, windGain: windG, whistleGain: whG, shoreGain: shoreG };
+}
+
+// a halyard tapping an aluminium mast — the sound of a full guest harbour. A
+// short metallic ping: a couple of detuned high partials with a fast decay.
+export function halyardClink(ctx, dest, t, o = {}) {
+  const base = o.freq ?? 2100;
+  for (const [mult, lvl] of [[1, 1], [2.76, 0.5], [5.4, 0.25]]) {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = base * mult * (0.98 + Math.random() * 0.04);
+    const g = ctx.createGain();
+    const peak = (o.level ?? 0.05) * lvl;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12 + Math.random() * 0.1);
+    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    osc.connect(g);
+    if (pan) { pan.pan.value = o.pan ?? 0; g.connect(pan); pan.connect(dest); }
+    else g.connect(dest);
+    osc.start(t); osc.stop(t + 0.4);
+  }
 }
 
 export function createAudio() {
   let ctx = null, started = false, muted = true;
   let master = null, washGain = null, whiteBuf = null;
+  let windGain = null, whistleGain = null, shoreGain = null;
+  let engine = null;                       // { gain, osc, sub } diesel throb
   let speedNorm = 0;                       // 0..1, from setSpeed
-  let lapTimer = null, gullTimer = null;
+  let windNorm = 0, shoreNorm = 0, harborNorm = 0, motorOn = false, throttle = 0;
+  let lapTimer = null, gullTimer = null, clinkTimer = null;
+
+  // a small diesel auxiliary: a low throbbing tone (firing frequency) with a
+  // sub and a little grille rattle, amplitude-pulsed so it chugs
+  function buildEngine() {
+    const g = ctx.createGain(); g.gain.value = 0; g.connect(master);
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = 46;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 0.7;
+    const sub = ctx.createOscillator(); sub.type = 'sine'; sub.frequency.value = 23;
+    const subG = ctx.createGain(); subG.gain.value = 0.5;
+    // chug: amplitude pulse a touch above idle firing rate
+    const pulse = ctx.createOscillator(); pulse.type = 'sine'; pulse.frequency.value = 7.5;
+    const pulseG = ctx.createGain(); pulseG.gain.value = 0.35;
+    const inner = ctx.createGain(); inner.gain.value = 0.7;
+    osc.connect(lp); lp.connect(inner); sub.connect(subG); subG.connect(inner);
+    inner.connect(g);
+    pulse.connect(pulseG); pulseG.connect(inner.gain);
+    osc.start(); sub.start(); pulse.start();
+    return { gain: g, osc, sub };
+  }
+
+  function scheduleClink() {
+    // halyards tapping masts: only when a guest harbour is close, and denser
+    // the closer you are (a full harbour is a whole chorus of them)
+    const wait = (0.5 + Math.random() * 2.2) / (0.15 + harborNorm);
+    clinkTimer = setTimeout(() => {
+      if (ctx && !muted && harborNorm > 0.05 && Math.random() < 0.4 + harborNorm * 0.5) {
+        const n = 1 + Math.floor(Math.random() * 2);
+        const pan = (Math.random() * 2 - 1) * 0.8;
+        const freq = 1700 + Math.random() * 900;
+        for (let k = 0; k < n; k++) {
+          halyardClink(ctx, master, ctx.currentTime + 0.02 + k * (0.13 + Math.random() * 0.12),
+            { freq, level: (0.02 + Math.random() * 0.05) * harborNorm, pan });
+        }
+      }
+      scheduleClink();
+    }, wait * 1000);
+  }
 
   function scheduleLap() {
     // quicker, slightly firmer laps under way; lazy and soft at rest
@@ -189,9 +284,12 @@ export function createAudio() {
     const beds = buildBeds(ctx, master);
     washGain = beds.washGain;
     whiteBuf = beds.whiteBuf;
+    windGain = beds.windGain; whistleGain = beds.whistleGain; shoreGain = beds.shoreGain;
+    engine = buildEngine();
 
     scheduleLap();
     scheduleGull();
+    scheduleClink();
 
     if (!muted) master.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 2.5);
   }
@@ -202,11 +300,37 @@ export function createAudio() {
     if (ctx && washGain) washGain.gain.setTargetAtTime(speedNorm * 0.12, ctx.currentTime, 0.9);
   }
 
+  // apparent wind (0..1) → the rig sings; a whisper of whistle only up high
+  function setWind(norm) {
+    windNorm = Math.min(Math.max(norm, 0), 1);
+    if (ctx && windGain) {
+      windGain.gain.setTargetAtTime(0.02 + windNorm * 0.09, ctx.currentTime, 1.2);
+      whistleGain.gain.setTargetAtTime(windNorm * windNorm * 0.02, ctx.currentTime, 1.2);
+    }
+  }
+
+  // scene context: shore proximity (0..1), nearest guest harbour (0..1),
+  // engine on + throttle — drives the shore wash, halyard chorus, diesel throb
+  function setEnv(o = {}) {
+    shoreNorm = Math.min(Math.max(o.shore ?? 0, 0), 1);
+    harborNorm = Math.min(Math.max(o.harbor ?? 0, 0), 1);
+    motorOn = !!o.motorOn; throttle = Math.min(Math.max(o.throttle ?? 0, 0), 1);
+    if (!ctx) return;
+    if (shoreGain) shoreGain.gain.setTargetAtTime(shoreNorm * shoreNorm * 0.11, ctx.currentTime, 1.0);
+    if (engine) {
+      const lvl = motorOn ? 0.05 + throttle * 0.10 : 0;
+      engine.gain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.4);
+      const rpm = 42 + throttle * 26;               // idle → cruising firing rate
+      engine.osc.frequency.setTargetAtTime(rpm, ctx.currentTime, 0.5);
+      engine.sub.frequency.setTargetAtTime(rpm * 0.5, ctx.currentTime, 0.5);
+    }
+  }
+
   function setMuted(m) {
     muted = m;
     if (!ctx) { if (!m) start(); return; }           // first unmute also starts it
     if (master) master.gain.setTargetAtTime(muted ? 0 : 0.8, ctx.currentTime, 0.2);
   }
 
-  return { start, setSpeed, setMuted, get muted() { return muted; } };
+  return { start, setSpeed, setWind, setEnv, setMuted, get muted() { return muted; } };
 }

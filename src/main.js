@@ -22,6 +22,7 @@ import { createChart } from './map.js';
 import { createGustField } from './wind.js';
 import { createShips, ROUTES } from './ships.js';
 import { createFleet } from './fleet.js';
+import { HARBOR_POINTS } from './props.js';
 import { createLandmarks } from './landmarks.js';
 
 /* ── renderer / scene / camera ── */
@@ -290,8 +291,22 @@ function animate() {
     hud.setLocation(best && bd < 900 ? (bd < 90 ? best.name : 'near ' + best.name) : 'open sea');
     if (archipelago.debugOn) hud.setDebug(archipelago.debugInfo);   // counts follow the streamed region
     chart.tick();   // live ships on the minimap, or the open chart
+
+    // soundscape context (twice a second): how close is the shore, and a guest
+    // harbour? feed the shore wash, the halyard chorus, the diesel throb.
+    const bx = boat.state.pos.x, bz = boat.state.pos.z;
+    let hi = -10;
+    for (const [ox, oz] of [[0, 0], [35, 0], [-35, 0], [0, 35], [0, -35]]) {
+      const h = archipelago.heightAt(bx + ox, bz + oz); if (h > hi) hi = h;
+    }
+    const shore = THREE.MathUtils.clamp((hi + 4) / 4, 0, 1);   // −4 m deep → 0, at/above water → 1
+    let hd = 1e9;
+    for (const [hx, hz] of HARBOR_POINTS) { const d = Math.hypot(hx - bx, hz - bz); if (d < hd) hd = d; }
+    const harbor = THREE.MathUtils.clamp((360 - hd) / 300, 0, 1);
+    audio.setEnv({ shore, harbor, motorOn: boat.state.motorOn, throttle: boat.state.throttle });
   }
   audio.setSpeed(boat.state.speed);
+  audio.setWind(THREE.MathUtils.clamp((wind.speed - 0.55) / 0.85, 0, 1));
   composer.render();
 
   if (firstFrame) {

@@ -366,6 +366,8 @@ const HARBORS = [
   { name: 'Aspö',     wx: 6454,  wz: -16085, pontoons: 1, len: 26, fuel: false, boathouses: 2, cafe: false },
   { name: 'Berghamn', wx: 17306, wz: -27547, pontoons: 2, len: 32, fuel: true,  boathouses: 2, cafe: false },
 ];
+// world points of the guest harbours, for the soundscape (halyard chorus)
+export const HARBOR_POINTS = HARBORS.map((h) => [h.wx, h.wz]);
 
 // a falun-red gabled boathouse (sjöbod) sitting at the shore, water-side door
 function boathouse(rng, w = 4.6, d = 5.6) {
