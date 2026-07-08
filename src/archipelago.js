@@ -820,14 +820,18 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   // real roads (OSM highways) with bboxes for region filtering
-  const roads = (roadsData && roadsData.roads ? roadsData.roads : []).map((r) => {
+  const bbxd = (r) => {
     let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
     for (const [x, z] of r.p) {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
     return { c: r.c, p: r.p, minX, minZ, maxX, maxZ };
-  });
+  };
+  const roads = (roadsData && roadsData.roads ? roadsData.roads : []).map(bbxd);
+  // REAL OSM bridges (way[highway][bridge]) — bridges render only where they
+  // actually are, no heuristic guessing (that put a phantom bridge over Utö)
+  const bridgeWays = (roadsData && roadsData.bridges ? roadsData.bridges : []).map(bbxd);
 
   // real land cover: wood/forest (c=0), heath (1), scrub (2) — with bboxes
   const nature = (realData && realData.nature ? realData.nature : []).map((n) => {
@@ -1270,7 +1274,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // real roads, draped over the terrain as gravel ribbons (one merged mesh).
   // Samples every ~12 m; runs break where the road would dip underwater
   // (the chart draws some islands smaller than the road network knows them).
-  function buildRoadMesh(regionRoads) {
+  function buildRoadMesh(regionRoads, regionBridges) {
     const pos = [], col = [], idx = [], bridges = [];
     // asphalt: dark grey with a warm-grey shoulder on minor lanes
     const cMajor = new THREE.Color(0x3b3d42), cMinor = new THREE.Color(0x47443f);
@@ -1311,8 +1315,6 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         }
         run = [];
       };
-      // where the road leaves land, crosses water, and lands again is a BRIDGE
-      let lastLand = null, crossed = false;
       for (let i = 0; i < rd.p.length - 1; i++) {
         const [x1, z1] = rd.p[i], [x2, z2] = rd.p[i + 1];
         const segL = Math.hypot(x2 - x1, z2 - z1);
@@ -1321,17 +1323,20 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const t = s2 / steps;
           const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
           const y = hAt(x, z);
-          if (y < 0.25) { flush(); crossed = true; continue; }   // over water
-          if (crossed && lastLand) {
-            const gap = Math.hypot(x - lastLand[0], z - lastLand[2]);
-            if (gap > 12 && gap < 620) bridges.push({ a: lastLand, b: [x, y, z], hw });  // a real span
-            crossed = false;
-          }
+          if (y < 0.25) { flush(); continue; }    // over water — the bridge (below) fills it
           run.push([x, y + 0.2, z]);
-          lastLand = [x, y, z];
         }
       }
       flush();
+    }
+    // bridges are the REAL OSM bridge ways in the region — no heuristic guessing.
+    // Each way's ends sit at road level; the span arches over whatever's between.
+    for (const bw of (regionBridges || [])) {
+      const pp = bw.p, a = pp[0], b = pp[pp.length - 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 14) continue;                     // skip culverts / tiny overpasses
+      const ya = Math.max(heightAt(a[0], a[1]), 0.4), yb = Math.max(heightAt(b[0], b[1]), 0.4);
+      bridges.push({ a: [a[0], ya, a[1]], b: [b[0], yb, b[1]], hw: bw.c === 1 ? 2.8 : 1.8 });
     }
     const grp = new THREE.Group();
     if (idx.length) {
@@ -1509,8 +1514,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
                     - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
       .slice(0, 260);
     hashRoads(regionRoads);
+    const regionBridges = bridgeWays
+      .filter((r) => r.maxX > cx0 - RBUILD && r.minX < cx0 + RBUILD && r.maxZ > cz0 - RBUILD && r.minZ < cz0 + RBUILD)
+      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
+                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
+      .slice(0, 90);
 
-    job = { set, i: 0, cx0, cz0, t0: performance.now(), regionRoads };
+    job = { set, i: 0, cx0, cz0, t0: performance.now(), regionRoads, regionBridges };
     stepRebuild(40);                      // a generous first slice: teleports feel instant
   }
 
@@ -1524,7 +1534,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   function finalizeRebuild() {
-    const { set, cx0, cz0, t0, regionRoads } = job;
+    const { set, cx0, cz0, t0, regionRoads, regionBridges } = job;
     job = null;
     disposeActive();                      // the old region leaves only now
     activeSet = set;
@@ -1581,7 +1591,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     const inBox = (x, z) => Math.abs(x - cx0) < RB && Math.abs(z - cz0) < RB;
     // roads were selected up-front in rebuild() (the scatter needed them);
     // here they become the terrain ribbons + the cars' routes
-    const roadMesh = buildRoadMesh(regionRoads);
+    const roadMesh = buildRoadMesh(regionRoads, regionBridges);
     if (roadMesh) activeGroup.add(roadMesh);
 
     const region = {
