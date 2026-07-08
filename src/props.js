@@ -217,7 +217,10 @@ function person(rng, seated = false) {
 // with the main furled, a cousin of the boat you're sailing. bow at +Z.
 function smallSailboat(rng) {
   const g = new THREE.Group();
-  const hullMat = [M.hullWhite, M.white, M.navy][Math.floor(rng() * 3)];
+  // real marinas are a mix: white glassfibre, navy, dark-green, wine-red, a
+  // varnished wooden classic, pale grey
+  const hullMat = [M.hullWhite, M.white, M.navy, M.falunRed, M.wood, M.greyWall,
+    new THREE.MeshStandardMaterial({ color: 0x27503f, roughness: 0.5 })][Math.floor(rng() * 7)];
   const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 4.4, 4, 9), hullMat);
   hull.scale.set(1, 0.72, 0.42);
   hull.rotation.x = Math.PI / 2; hull.position.y = 0.34; g.add(hull);
@@ -240,8 +243,13 @@ function smallSailboat(rng) {
   tiller.rotation.x = Math.PI / 2 - 0.25; tiller.position.set(0, 0.66, -1.5); g.add(tiller);
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.055, 7.2, 6), M.steel);
   mast.position.set(0, 4.1, 0.1); g.add(mast);
-  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.6, 6), M.sail);
-  boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.15, -1.0); g.add(boom);   // furled main
+  // furled main under a canvas sail cover (grey / navy / dark green — never bare)
+  const coverMat = [M.greyWall, M.navy, new THREE.MeshStandardMaterial({ color: 0x2d4a3a, roughness: 0.9 })][Math.floor(rng() * 3)];
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.11, 2.7, 6), coverMat);
+  boom.rotation.x = Math.PI / 2; boom.position.set(0, 1.18, -1.0); g.add(boom);
+  // sprayhood / dodger over the companionway — the iconic marina silhouette
+  const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.7, 10, 1, false, 0, Math.PI), coverMat);
+  hood.rotation.z = Math.PI / 2; hood.position.set(0, 0.72, -0.45); hood.scale.set(1, 0.8, 1); g.add(hood);
   // standing rigging — the wires make her read as a yacht at any distance
   const wire = (x1, y1, z1, x2, y2, z2) => {
     const a = new THREE.Vector3(x1, y1, z1), b = new THREE.Vector3(x2, y2, z2);
@@ -425,23 +433,20 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   const C_UPLINTH = new THREE.Color(0x8a8578);            // pale granite basement
   const C_UROOF = new THREE.Color(0x5b5f63);              // light zinc/sheet roof (not black)
   const _c = new THREE.Color();
-  // "big-building cluster" field: a big footprint only becomes a CITY apartment
-  // block where several OTHER big buildings cluster nearby (a real Helsinki /
-  // Turku / Porvoo / Mariehamn core). A lone big building in the countryside is
-  // a barn/warehouse — counting BIG buildings (not all, since city blocks are
-  // large + spaced and would otherwise undercount) is what separates the two.
-  const DCELL = 95, dHash = new Map();
-  for (const b of (region.buildings || [])) {
-    if (b[2] * b[3] <= 240) continue;                    // only big footprints define a core
-    const k = Math.floor(b[0] / DCELL) + ',' + Math.floor(b[1] / DCELL);
-    dHash.set(k, (dHash.get(k) || 0) + 1);
-  }
-  const bigCluster = (x, z) => {
-    const cx = Math.floor(x / DCELL), cz = Math.floor(z / DCELL);
-    let n = 0;
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
-      n += dHash.get((cx + dx) + ',' + (cz + dz)) || 0;
-    return n;                                             // big buildings within ~285 m box
+  // apartment blocks belong ONLY to the real cities — a village (Nauvo, Korpo…)
+  // packs medium buildings tighter than Helsinki packs its big spaced blocks, so
+  // no density metric separates them. Whitelist the actual city cores by their
+  // game-frame centre + radius; everywhere else, a big building is timber.
+  const CITY = [
+    [194000, -40000, 4200],   // Helsinki (+ Espoo/Lauttasaari edge)
+    [41200, -70200, 3000],    // Turku
+    [233500, -65100, 2200],   // Porvoo
+    [82800, -2800, 1500],     // Hanko
+    [-86300, -32800, 1600],   // Mariehamn
+  ];
+  const inCity = (x, z) => {
+    for (const [cx, cz, r] of CITY) if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return true;
+    return false;
   };
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
@@ -458,9 +463,9 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     //    differently-coloured segments, the way a real Helsinki street reads.
     //    Small plans fall through to the timber-cottage code. ──
     const foot = bw * bd;
-    // urban block ONLY where big buildings cluster (≥ 5 in the ~285 m box) —
-    // a real city core. A lone/few big buildings stay timber (barn/warehouse).
-    if (cls === 0 && foot > 240 && bigCluster(bx, bz) >= 5) {
+    // urban block ONLY inside a real city core; elsewhere a big footprint is
+    // a timber barn/warehouse, never a pastel apartment block in a village.
+    if (cls === 0 && foot > 240 && inCity(bx, bz)) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
       const floors = Math.max(2, Math.min(7, Math.round(Math.sqrt(foot) / 6.4)));
       const fh = 3.2, bh = floors * fh;                  // storey height, body height
