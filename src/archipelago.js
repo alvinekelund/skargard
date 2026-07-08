@@ -1064,7 +1064,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     // The Finnish shore is strewn with them; they give the nature its
     // granularity so a "bare" rock isn't a smooth hump. On forested islands
     // they poke through the trees; on bald ones they ARE the landscape.
-    const btarget = Math.min(Math.floor(isl.A * (kind === 'forest' ? 0.0045 : 0.009)), 190);
+    // mainland tiles cover built-up coast + cities — far fewer strewn boulders
+    // there (a downtown isn't a moraine field), just the odd park outcrop
+    const btarget = Math.min(Math.floor(isl.A * (isl.cut ? 0.0008 : kind === 'forest' ? 0.0045 : 0.009)), isl.cut ? 40 : 190);
     let bp = 0, bt = 0;
     while (bp < btarget && bt < btarget * 8) {
       bt++;
