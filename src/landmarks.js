@@ -108,9 +108,52 @@ function turkuCathedral() {
   return g;
 }
 
+// Uspenski Cathedral — the great red-brick Orthodox cathedral on the
+// Katajanokka rock, right over the South Harbour: a mass of dark-red brick
+// under gilded onion domes (one big central cupola on a tall drum, ringed by
+// smaller ones) with green-copper tent roofs. Together with Engel's white
+// cathedral it's what tells you, from the water, that this is Helsinki.
+function uspenskiCathedral() {
+  const g = new THREE.Group();
+  const brick = new THREE.MeshStandardMaterial({ color: 0x8f4030, roughness: 0.9 });
+  const brickD = new THREE.MeshStandardMaterial({ color: 0x743323, roughness: 0.9 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x5f8676, roughness: 0.5, metalness: 0.15 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xcaa03e, roughness: 0.35, metalness: 0.65 });
+  const stone = new THREE.MeshStandardMaterial({ color: 0xb8b0a0, roughness: 0.85 });
+
+  g.add(box(30, 10, 30, 0, -4, 0, stone));                 // the rock podium it stands on
+  g.add(box(21, 15, 21, 0, 8, 0, brick));                  // brick body
+  // arched gables (kokoshnik) hinted as a lighter brick band under the roofline
+  g.add(box(22, 2.4, 22, 0, 16, 0, brickD));
+  // green tent roofs stepping up to the central drum
+  const tent = (r, h, y, mat) => { const m = new THREE.Mesh(new THREE.ConeGeometry(r, h, 4), mat); m.rotation.y = Math.PI / 4; m.position.y = y; return m; };
+  g.add(tent(15.5, 7, 20.5, green));
+
+  // a gilded onion dome on a drum
+  const onion = (R, y, drumH, drumR) => {
+    const grp = new THREE.Group();
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(drumR, drumR, drumH, 12), brick);
+    drum.position.y = y; grp.add(drum);
+    // onion: a sphere pinched to a point on top
+    const b = new THREE.Mesh(new THREE.SphereGeometry(R, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), gold);
+    b.scale.y = 1.15; b.position.y = y + drumH / 2; grp.add(b);
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(R * 0.5, R * 1.3, 12), gold);
+    tip.position.y = y + drumH / 2 + R * 0.55; grp.add(tip);
+    grp.add(box(0.3, 2.4, 0.3, 0, y + drumH / 2 + R * 1.15, 0, gold));   // cross staff
+    grp.add(box(1.5, 0.3, 0.3, 0, y + drumH / 2 + R * 0.95, 0, gold));
+    return grp;
+  };
+  g.add(onion(5.2, 26, 12, 4.2));                          // tall central cupola
+  for (const [cx, cz] of [[8, 8], [-8, 8], [8, -8], [-8, -8]]) {
+    const o = onion(2.1, 20, 5, 1.6); o.position.set(cx, 0, cz); g.add(o);   // four corner cupolas
+  }
+  return g;
+}
+
 export function createLandmarks(scene) {
   const items = [
     { build: helsinkiCathedral, lat: 60.1697, lon: 24.9521, y: 7, yaw: 0 },
+    { build: uspenskiCathedral, lat: 60.1683, lon: 24.9590, y: 6, yaw: 0.3 },
     { build: turkuCathedral, lat: 60.4525, lon: 22.2783, y: 8, yaw: 0.5 },
   ];
   const group = new THREE.Group();

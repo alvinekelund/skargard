@@ -614,6 +614,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     .map((c) => new THREE.Color(c));
   const C_UPLINTH = new THREE.Color(0x8a8578);            // pale granite basement
   const C_UROOF = new THREE.Color(0x5b5f63);              // light zinc/sheet roof (not black)
+  // Helsinki rooflines are pitched/mansard sheet metal in a few weathered
+  // tones — patinated green, oxide red, zinc grey, dark tar — which is what
+  // gives the skyline its serrated texture instead of a flat parapet band
+  const UROOFS = [0x4d5b52, 0x8a4a3c, 0x54585c, 0x3b3e42, 0x6a6357].map((c) => new THREE.Color(c));
+  const C_CHIMNEY = new THREE.Color(0xc9c2b6);
   const _c = new THREE.Color();
   // apartment blocks belong ONLY to the real cities — a village (Nauvo, Korpo…)
   // packs medium buildings tighter than Helsinki packs its big spaced blocks, so
@@ -667,9 +672,33 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
         const ox = alongBW ? off : 0, oz = alongBW ? 0 : off;
         const uc = URBAN[Math.floor(rngU() * URBAN.length)];
         const sbh = bh * (0.86 + rngU() * 0.28);         // slight per-segment height step
-        // plinth + roof cap in the vertex-coloured mesh
+        const capY = sbh + 0.9;
+        // plinth + overhanging cornice in the vertex-coloured mesh
         bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.2, 1.0, sd + 0.2).translate(ox, 0.5, oz), C_UPLINTH)));
-        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.16, 0.5, sd + 0.16).translate(ox, sbh + 0.9, oz), C_UROOF)));
+        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.5, 0.4, sd + 0.5).translate(ox, capY, oz), C_TRIM)));  // cornice
+        // roof: a pitched/mansard sheet-metal roof (ridge along the long side)
+        // on most blocks, an occasional flat roof — so the skyline serrates
+        const roofC = UROOFS[Math.floor(rngU() * UROOFS.length)];
+        if (rngU() < 0.78) {
+          // a gabled/mansard roof as a triangular prism (ridge along the long side)
+          const alx = sw >= sd;
+          const ridgeL = alx ? sw : sd, fullW = alx ? sd : sw;
+          const rh = Math.min(fullW * 0.42, 2.2 + rngU() * 2.6);
+          const shape = new THREE.Shape();
+          shape.moveTo(-fullW / 2 - 0.25, 0); shape.lineTo(fullW / 2 + 0.25, 0); shape.lineTo(0, rh); shape.closePath();
+          const geo = new THREE.ExtrudeGeometry(shape, { depth: ridgeL + 0.3, bevelEnabled: false });
+          geo.translate(0, 0, -(ridgeL + 0.3) / 2);
+          if (alx) geo.rotateY(Math.PI / 2);
+          geo.translate(ox, capY + 0.15, oz);
+          bodyGeos.push(uplace(paintGeo(geo, roofC)));
+        } else {
+          bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.16, 0.5, sd + 0.16).translate(ox, capY + 0.1, oz), roofC)));  // flat roof
+        }
+        // a chimney or two poking up
+        for (let ch = 0, n = 1 + (rngU() < 0.5 ? 1 : 0); ch < n; ch++) {
+          const chx = ox + (rngU() - 0.5) * sw * 0.6, chz = oz + (rngU() - 0.5) * sd * 0.6;
+          bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(0.7, 1.8 + rngU() * 1.2, 0.7).translate(chx, capY + 1.6, chz), C_CHIMNEY)));
+        }
         // four textured, tinted facade walls
         const mk = (w2, px, pz, ry) => {
           let g2 = urbanWall(w2, sbh, TILE);
