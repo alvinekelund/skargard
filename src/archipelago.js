@@ -1101,7 +1101,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
       if (y < 0.15 || y > H + 0.3) continue;
-      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl !== 3 && cl !== 4 && treeRng() < 0.6) continue; }
+      if (satGrid) {                                    // the photo decides where rock is strewn
+        const cl = coverAt(isl, lx, lz);
+        if (cl === 2) continue;                         // open meadow stays clean — no boulders in a field
+        if (cl === 1 && treeRng() < 0.65) continue;     // forest: only the odd erratic pokes through
+      }
       if (nearRoad(cx + lx, cz + lz)) continue;
       // most are knee-to-head boulders; ~14% are big erratics / rounded outcrops
       const big = treeRng() < 0.14;
@@ -1122,7 +1126,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       for (let iz = 0; iz < c.nz; iz++) {
         for (let ix = 0; ix < c.nx; ix++) {
           const cls = c._v[iz * c.nx + ix];
-          if (cls !== 2 && cls !== 3) continue;
+          if (cls === 0) continue;                      // water/unclassified: nothing grows here
           const nlx = c.x0 + ix * c.dx, nlz = c.z0 + iz * c.dz;
           if (cls === 2 && grassBudget > 0) {
             const tufts = Math.min(3, grassBudget);
