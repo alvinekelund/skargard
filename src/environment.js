@@ -12,8 +12,8 @@ export const PRESETS = {
     sunColor: 0xfff3e0, sunInt: 5.6, hemiSky: 0x7fb2ff, hemiGround: 0x2e4f46, hemiInt: 0.6,
     ambient: 0x3a6ea5, ambientInt: 0.22, fog: 0xa9c6e0, fogDensity: 0.00022,
     waterColor: 0x2a544e, sunWater: 0xfff2d0, distortion: 3.4, waterSize: 2.8,
-    cloudWarm: 0xfff8ee, cloudCool: 0xcfdcec, cloudCount: 11, cloudOpacity: 0.55, cloudElevHi: true,
-    cloudSize: [800, 1500],
+    cloudWarm: 0xfff8ee, cloudCool: 0xc4d3e6, cloudCount: 14, cloudOpacity: 0.82, cloudElevHi: true,
+    cloudSize: [900, 1800],
     bloom: { strength: 0.25, radius: 0.4, threshold: 1.1 },
   },
   golden: {
@@ -24,7 +24,7 @@ export const PRESETS = {
     sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x6c7fd8, hemiGround: 0x2e2a3e, hemiInt: 0.3,
     ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xe08055, fogDensity: 0.0009,
     waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
-    cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.65, cloudElevHi: false,
+    cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.78, cloudElevHi: false,
     cloudSize: [1800, 3600],
     // threshold >= 1.25: only true HDR (sun disc + glints) blooms, never the halo
     bloom: { strength: 0.18, radius: 0.55, threshold: 1.25 },
@@ -90,7 +90,15 @@ function cloudTexture(seed) {
     let d = fb(u * 3.4 + seed, v * 3.4) * 0.5 + 0.5;
     d *= Math.max(0, 1 - r); d = Math.max(0, d - 0.2) / 0.8;
     d = Math.pow(THREE.MathUtils.clamp(d, 0, 1), 1.4);
-    const i = (y * S + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; img.data[i + 3] = (d * 255) | 0;
+    // top-lit cumulus shading: bright sunlit crown (v→0), grey-blue shadowed
+    // base (v→1) so the cloud reads as a 3-D puff, not a flat white smear that
+    // vanishes into a hazy sky. A little noise breaks the gradient into lobes.
+    const lit = 0.66 + 0.34 * (1 - v) + (fb(u * 6.1 + seed * 2, v * 6.1) - 0.5) * 0.14;
+    const s = THREE.MathUtils.clamp(lit, 0.5, 1);
+    const i = (y * S + x) * 4;
+    img.data[i] = (255 * s) | 0; img.data[i + 1] = (255 * s) | 0;
+    img.data[i + 2] = (255 * Math.min(1, s * 1.05)) | 0;   // faint cool cast in shadow
+    img.data[i + 3] = (d * 255) | 0;
   }
   ctx.putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
@@ -216,14 +224,16 @@ export function createEnvironment(scene, renderer) {
       const mat = new THREE.SpriteMaterial({ map: cloudTextures[i % 3], transparent: true, depthWrite: false, fog: false });
       const spr = new THREE.Sprite(mat);
       const az = THREE.MathUtils.degToRad(preset.sunAz) + (crng() - 0.5) * Math.PI * 1.7;
-      const elev = THREE.MathUtils.degToRad((preset.cloudElevHi ? 10 : 3) + crng() * (preset.cloudElevHi ? 42 : 32));
+      // spread across the sky including a low band near the horizon, so clouds
+      // are in frame while sailing (looking at the sea-line), not only overhead
+      const elev = THREE.MathUtils.degToRad((preset.cloudElevHi ? 6 : 3) + crng() * (preset.cloudElevHi ? 46 : 30));
       const dir = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - elev, az);
       spr.position.copy(dir).multiplyScalar(3000 + crng() * 3000);
       const sunAmt = Math.pow(THREE.MathUtils.clamp(dir.dot(sunDir), 0, 1), 1.6);
       mat.color.copy(cool).lerp(warm, sunAmt);
-      mat.opacity = preset.cloudOpacity * (0.5 + 0.5 * crng());
+      mat.opacity = preset.cloudOpacity * (0.66 + 0.34 * crng());
       const [w0, w1] = preset.cloudSize || [1500, 2700];
-      const w = w0 + crng() * (w1 - w0); spr.scale.set(w, w * (0.32 + crng() * 0.18), 1);
+      const w = w0 + crng() * (w1 - w0); spr.scale.set(w, w * (0.42 + crng() * 0.2), 1);
       cloudGroup.add(spr);
     }
   }
