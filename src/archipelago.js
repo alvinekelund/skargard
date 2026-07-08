@@ -1350,55 +1350,70 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     return grp.children.length ? grp : null;
   }
 
-  // realistic bridges where the roads span sounds: a gently arched concrete
-  // deck on piers, with railings — clearance scaled to the span so small boats
-  // pass under. Deck/pier grey, rails darker; one merged vertex-coloured mesh.
-  const CB_DECK = new THREE.Color(0x9d9a92), CB_PIER = new THREE.Color(0x8b877e), CB_RAIL = new THREE.Color(0x54514b);
+  // bridges where the roads span sounds — slim concrete beam bridges the way
+  // the archipelago actually has them: a deck slab with edge beams and a light
+  // railing, on slender capped piers, gently arched so small boats pass under.
+  const CB_TOP = new THREE.Color(0xb0a487);   // gravel road surface (matches the road)
+  const CB_SLAB = new THREE.Color(0xb3afa4);  // pale concrete slab / fascia
+  const CB_PIER = new THREE.Color(0xa6a298);  // pier concrete
+  const CB_RAIL = new THREE.Color(0x8f8b83);  // light metal rail
   function buildBridges(bridges) {
     if (!bridges.length) return null;
     const p = [], c = [], ix = [];
-    const quad = (ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, col) => {
+    const quad = (A, B, C, D, col) => {                         // 4 xyz arrays, CCW
       const b0 = p.length / 3;
-      p.push(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz);
+      p.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2], D[0], D[1], D[2]);
       for (let k = 0; k < 4; k++) c.push(col.r, col.g, col.b);
       ix.push(b0, b0 + 1, b0 + 2, b0, b0 + 2, b0 + 3);
-    };
-    const boxCol = (x0, y0, z0, sx, sy, sz, col) => {           // small pier box
-      const b0 = p.length / 3;
-      const xs = [-sx / 2, sx / 2], ys = [0, sy], zs = [-sz / 2, sz / 2];
-      for (const yy of ys) for (const zz of zs) for (const xx of xs) p.push(x0 + xx, y0 + yy, z0 + zz);
-      for (let k = 0; k < 8; k++) c.push(col.r, col.g, col.b);
-      const f = [[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]];
-      for (const [a, b, d, e] of f) ix.push(b0 + a, b0 + b, b0 + d, b0 + a, b0 + d, b0 + e);
     };
     for (const br of bridges) {
       const ax = br.a[0], az = br.a[2], bx = br.b[0], bz = br.b[2];
       const len = Math.hypot(bx - ax, bz - az);
-      let dx = (bx - ax) / len, dz = (bz - az) / len;
-      const px = -dz, pz = dx;                                   // perpendicular
-      const hw = (br.hw + 0.7);                                  // deck half-width
-      const clr = Math.min(3.5 + len * 0.02, 11);               // navigable clearance
-      const N = Math.max(4, Math.round(len / 10));
+      const dx = (bx - ax) / len, dz = (bz - az) / len;         // along span
+      const px = -dz, pz = dx;                                  // across deck
+      const hw = br.hw + 0.5, depth = 0.55;                     // deck half-width, slab depth
+      const clr = Math.min(2.4 + len * 0.013, 6.5);            // gentler arch
+      const N = Math.max(6, Math.round(len / 8));
       const y0 = br.a[1] + 0.2, y1 = br.b[1] + 0.2;
-      const yat = (t) => y0 + (y1 - y0) * t + Math.sin(Math.PI * t) * clr;   // arch
-      let prev = null;
+      const yat = (t) => y0 + (y1 - y0) * t + Math.sin(Math.PI * t) * clr;
+      // oriented box aligned to the span (across = perp·ha, along = dir·hl)
+      const obox = (cx, cy, cz, ha, hl, h, col) => {
+        const cor = [];
+        for (const uy of [0, h]) for (const sl of [-hl, hl]) for (const sa of [-ha, ha])
+          cor.push([cx + px * sa + dx * sl, cy + uy, cz + pz * sa + dz * sl]);
+        const b0 = p.length / 3;
+        for (const v of cor) { p.push(v[0], v[1], v[2]); c.push(col.r, col.g, col.b); }
+        for (const [a, b, d, e] of [[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]])
+          ix.push(b0 + a, b0 + b, b0 + d, b0 + a, b0 + d, b0 + e);
+      };
+      const at = (t, off, y) => { const x = ax + dx * len * t, z = az + dz * len * t;
+        return [x + px * off, y, z + pz * off]; };
+      let pr = null;
       for (let i = 0; i <= N; i++) {
-        const t = i / N, x = ax + dx * len * t, z = az + dz * len * t, y = yat(t);
-        const cur = { lx: x + px * hw, lz: z + pz * hw, rx: x - px * hw, rz: z - pz * hw, y };
-        if (prev) {
-          quad(prev.lx, prev.y, prev.lz, cur.lx, cur.y, cur.lz, cur.rx, cur.y, cur.rz, prev.rx, prev.y, prev.rz, CB_DECK);
-          for (const sgn of [1, -1]) {                          // railings
-            const ex = sgn > 0 ? 'l' : 'r';
-            const p0x = prev[ex + 'x'], p0z = prev[ex + 'z'], c0x = cur[ex + 'x'], c0z = cur[ex + 'z'];
-            quad(p0x, prev.y, p0z, c0x, cur.y, c0z, c0x, cur.y + 0.8, c0z, p0x, prev.y + 0.8, p0z, CB_RAIL);
-          }
+        const t = i / N, y = yat(t);
+        const cur = { lt: at(t, hw, y), rt: at(t, -hw, y), lb: at(t, hw, y - depth), rb: at(t, -hw, y - depth),
+          lr: at(t, hw, y + 1.0), rr: at(t, -hw, y + 1.0) };
+        if (pr) {
+          quad(pr.lt, cur.lt, cur.rt, pr.rt, CB_TOP);           // road surface
+          quad(pr.lt, pr.lb, cur.lb, cur.lt, CB_SLAB);          // left edge beam
+          quad(pr.rt, cur.rt, cur.rb, pr.rb, CB_SLAB);          // right edge beam
+          quad(pr.lb, pr.rb, cur.rb, cur.lb, CB_SLAB);          // underside
+          quad(pr.lt, pr.lr, cur.lr, cur.lt, CB_RAIL);          // left rail
+          quad(pr.rt, cur.rt, cur.rr, pr.rr, CB_RAIL);          // right rail
         }
-        prev = cur;
+        // railing posts every ~4 m
+        if (i % Math.max(1, Math.round(N / (len / 4))) === 0) for (const o of [hw, -hw]) {
+          const b = at(t, o, y), tp = at(t, o, y + 1.0);
+          obox(b[0], y, b[2], 0.09, 0.09, 1.0, CB_RAIL);
+        }
+        pr = cur;
       }
-      const piers = Math.max(1, Math.round(len / 55));           // piers into the water
+      // slim capped piers into the water
+      const piers = Math.max(1, Math.round(len / 48));
       for (let k = 1; k <= piers; k++) {
-        const t = k / (piers + 1), x = ax + dx * len * t, z = az + dz * len * t;
-        boxCol(x, -2, z, 2.4, yat(t) + 2, 2.4, CB_PIER);
+        const t = k / (piers + 1), y = yat(t), x = ax + dx * len * t, z = az + dz * len * t;
+        obox(x, -1.4, z, 0.85, 0.7, y - depth - 0.4 + 1.4, CB_PIER);   // shaft
+        obox(x, y - depth - 0.45, z, hw * 0.82, 0.95, 0.45, CB_PIER);  // pier cap
       }
     }
     const geo = new THREE.BufferGeometry();
