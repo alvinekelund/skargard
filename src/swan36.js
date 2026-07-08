@@ -26,6 +26,7 @@ function makeSailMaterial(phase = 0) {
       .replace('#include <common>', `#include <common>
         uniform float uTime, uFlap, uPhase;
         attribute vec2 aSail;                       // x: 0 luff → 1 leech · y: 0 foot → 1 head
+        varying vec2 vSail;
         float flogW(vec2 s, float t) {              // ≈ cloth flog, 3–7.5 Hz
           return sin(19.0*t + 9.0*s.x + 5.0*s.y)
                + 0.55*sin(31.0*t + 14.0*s.x + 2.7*s.y)
@@ -36,11 +37,22 @@ function makeSailMaterial(phase = 0) {
           objectNormal.z += uFlap * 0.6 * e0 * cos(19.0*(uTime+uPhase) + 9.0*aSail.x + 5.0*aSail.y);
           objectNormal = normalize(objectNormal); }`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vSail = aSail;
         { float t = uTime + uPhase;
           float edge = smoothstep(0.12, 1.0, aSail.x);   // amplitude grows toward the leech
           float span = 1.0 - 0.65 * aSail.y;             // calmer toward the head
           transformed.z += uFlap * 0.28 * edge * span * flogW(aSail, t);
           transformed.x -= uFlap * 0.05 * edge * sin(23.0*t + 6.0*aSail.y); }`);
+    // faint cross-cut panel seams + reinforced leech/corner tabling, so the
+    // cloth reads as sewn panels rather than one blank sheet
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n        varying vec2 vSail;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        { float fy = fract(vSail.y * 9.0);                    // 9 horizontal panels
+          float d = min(fy, 1.0 - fy);
+          diffuseColor.rgb *= mix(0.86, 1.0, smoothstep(0.0, 0.03, d));
+          float leech = smoothstep(0.95, 1.0, vSail.x);       // darker tabling up the leech
+          diffuseColor.rgb *= mix(1.0, 0.93, leech); }`);
   };
   return m;
 }
@@ -326,7 +338,7 @@ export function buildSwan36({ withSails = true } = {}) {
   // cloth, not cardboard. All points given as (x, y) in the centreline plane.
   const V2 = (x, y) => new THREE.Vector2(x, y);
   function sailMesh(tack, head, clew, leechCtrl, belly, phase = 0) {
-    const R = 16, K = 10;
+    const R = 22, K = 18;                              // finer grid: the deeper belly stays smooth, not faceted
     const leech = new THREE.QuadraticBezierCurve(clew, leechCtrl, head);
     const rings = [];
     for (let i = 0; i <= R; i++) {
