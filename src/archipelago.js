@@ -1323,18 +1323,28 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const t = s2 / steps;
           const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
           const y = hAt(x, z);
-          if (y < 0.25) { flush(); continue; }    // over water — the bridge (below) fills it
-          run.push([x, y + 0.2, z]);
+          // stay continuous across low shores (was dashing wherever the shore
+          // dipped under 0.25); break only over real water, where a bridge fills it
+          if (y < -0.7) { flush(); continue; }
+          run.push([x, Math.max(y, 0.1) + 0.16, z]);
         }
       }
       flush();
     }
-    // bridges are the REAL OSM bridge ways in the region — no heuristic guessing.
-    // Each way's ends sit at road level; the span arches over whatever's between.
+    // bridges are the REAL OSM bridge ways — BUT only where the span actually
+    // crosses WATER. Countless OSM bridge=yes ways are overpasses / embankments
+    // / culverts over dry land; those get no arch (that was the "bridge in a
+    // field" bug). Sample the span; build only if its middle is over water.
     for (const bw of (regionBridges || [])) {
       const pp = bw.p, a = pp[0], b = pp[pp.length - 1];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (len < 14) continue;                     // skip culverts / tiny overpasses
+      if (len < 16) continue;                     // skip culverts / tiny overpasses
+      let water = 0, samp = 0;
+      for (let t = 0.12; t <= 0.88; t += 0.095) {
+        samp++;
+        if (heightAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) < -0.8) water++;
+      }
+      if (water / samp < 0.45) continue;          // mostly over land → not a water bridge
       const ya = Math.max(heightAt(a[0], a[1]), 0.4), yb = Math.max(heightAt(b[0], b[1]), 0.4);
       bridges.push({ a: [a[0], ya, a[1]], b: [b[0], yb, b[1]], hw: bw.c === 1 ? 2.8 : 1.8 });
     }
