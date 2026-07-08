@@ -842,8 +842,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
-  let treeBudget = 14000;
-  let grassBudget = 6000, slabBudget = 1300, reedBudget = 2200;
+  let treeBudget = 17000;
+  let grassBudget = 4200, slabBudget = 1300, reedBudget = 2200;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
   function buildIsland(isl) {
@@ -991,8 +991,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     if (isl.cover ? satForest : (kind === 'forest' || hasWood)) {
       // base bonus scales with area: a flat constant times 50 skerries used
       // to drain the whole region budget before the main island's turn
-      const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.012), 260) : 0;
-      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.009 : 0.006)) + base, 2600, treeBudget);
+      const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.016), 340) : 0;
+      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.013 : 0.009)) + base, 3400, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -1023,14 +1023,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           islandHeight(lx+e,lz,isl) - islandHeight(lx-e,lz,isl),
           islandHeight(lx,lz+e,isl) - islandHeight(lx,lz-e,isl)) / (2*e);
         if (dy > 1.0 && treeRng() > 0.3) continue;
-        const isBirch = treeRng() < 0.18;     // pine/spruce dominant, birch the accent
-        // REAL Nordic forest scale: mature 15–26 m canopy on the big sheltered
-        // islands, wind-stunted 5–12 m out on the exposed skerries — a pine
-        // must dwarf a house, not match it
-        const maturity = isl.A > 600000 ? 2.3 : isl.A > 120000 ? 1.8 : 1.15;
-        const sc = ((isBirch ? 0.8 : 0.7) + treeRng() * (isBirch ? 0.7 : 1.5)) * maturity;
-        _p.set(cx + lx, y - 0.15, cz + lz);
-        _s.set(sc * (0.85 + treeRng() * 0.3), sc, sc * (0.85 + treeRng() * 0.3));
+        const isBirch = treeRng() < 0.15;     // pine dominant, birch the accent
+        // REAL Nordic forest scale (base pine geom ~4 m): mature 15–27 m pine
+        // on sheltered islands, still real 9–20 m trees on the small ones (you
+        // canNOT see over a wooded skerry from a boat), only the outermost
+        // exposed rocks stay wind-stunted. A pine must tower over a house.
+        const maturity = isl.A > 600000 ? 2.9 : isl.A > 120000 ? 2.6 : isl.A > 20000 ? 2.2 : 1.7;
+        const sc = ((isBirch ? 0.95 : 1.0) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity;
+        _p.set(cx + lx, y - 0.2, cz + lz);
+        // pines are slender spires: taller than wide, so 25 m doesn't read as a blob
+        _s.set(sc * (0.6 + treeRng() * 0.22), sc, sc * (0.6 + treeRng() * 0.22));
         _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
         _m.compose(_p, _q, _s);
         (isBirch ? birchMats : pineMats).push(_m.clone());
@@ -1058,20 +1060,24 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       jp++;
     }
 
-    // scattered moraine boulders (Jurmo's "stone kingdom") on the bare rocks —
-    // with a satellite grid they cluster where the photo shows bare ground
-    const btarget = Math.min(Math.floor(isl.A * (kind === 'forest' ? 0.003 : 0.008)), 160);
+    // scattered granite — moraine boulders AND big glacial erratics/outcrops.
+    // The Finnish shore is strewn with them; they give the nature its
+    // granularity so a "bare" rock isn't a smooth hump. On forested islands
+    // they poke through the trees; on bald ones they ARE the landscape.
+    const btarget = Math.min(Math.floor(isl.A * (kind === 'forest' ? 0.0045 : 0.009)), 190);
     let bp = 0, bt = 0;
     while (bp < btarget && bt < btarget * 8) {
       bt++;
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
       if (y < 0.15 || y > H + 0.3) continue;
-      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl !== 3 && cl !== 4 && treeRng() < 0.75) continue; }
+      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl !== 3 && cl !== 4 && treeRng() < 0.6) continue; }
       if (nearRoad(cx + lx, cz + lz)) continue;
-      const sc = 0.5 + treeRng() * 1.6;
-      _p.set(cx + lx, y - 0.1, cz + lz);
-      _s.set(sc * (0.8 + treeRng() * 0.5), sc * (0.6 + treeRng() * 0.4), sc * (0.8 + treeRng() * 0.5));
+      // most are knee-to-head boulders; ~14% are big erratics / rounded outcrops
+      const big = treeRng() < 0.14;
+      const sc = big ? 2.6 + treeRng() * 2.4 : 0.5 + treeRng() * 1.5;
+      _p.set(cx + lx, y - (big ? 0.35 : 0.1), cz + lz);
+      _s.set(sc * (0.8 + treeRng() * 0.5), sc * (big ? 0.42 + treeRng() * 0.3 : 0.6 + treeRng() * 0.4), sc * (0.8 + treeRng() * 0.5));
       _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
       _m.compose(_p, _q, _s);
       boulderMats.push(_m.clone());
@@ -1367,8 +1373,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
-    treeBudget = 14000;                   // region-wide cap: near islands (sorted first) win
-    grassBudget = 6000; slabBudget = 1300; reedBudget = 2200;
+    treeBudget = 17000;                   // region-wide cap: near islands (sorted first) win
+    grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
 
