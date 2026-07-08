@@ -22,7 +22,9 @@ npm run dev      # → http://localhost:5183
 `M` **chart** (pan/zoom the whole real Archipelago Sea, click open water to sail there) ·
 `C` camera (chase → **helm POV** → orbit) · `T` time of day ·
 `I` **data overlay** (shows which features come from real data vs procedural, with rendered-vs-total counts) ·
-🔊 button mutes the sound (a real sailing-boat recording, freesound community)
+🔊 button mutes the sound (a procedural soundscape — hull laps, wind in the rig,
+a shore wash that rises as you close the land, halyards tapping masts in the guest
+harbours, gulls, and the diesel when you motor)
 
 ## How it feels
 
@@ -124,8 +126,11 @@ One coherent light drives the whole scene; everything below shares it.
   lighthouse) from a shadow camera that follows the boat.
 - **Sea** keeps Three's planar reflection but is biased toward a saturated Baltic
   teal (softer mirror, brighter body colour) so it reads as water, not a grey mirror.
-- **Trees** are instanced pines + birches, sun-rim-lit with a vertex-shader breeze;
-  the **wake** is a dynamic foam ribbon laid behind the boat, widening and fading astern.
+- **Trees** are two real conifers, not one — dark spruce spires in the sheltered
+  hollows and open-crowned **Scots pines** with warm reddish boles on the thin-soiled
+  rock, plus birch as the accent; stands lean to one dominant species (pine on the
+  outer skerries, wind-flagged), all sun-rim-lit with a vertex-shader breeze. The
+  **wake** is a dynamic foam ribbon laid behind the boat, widening and fading astern.
 - **Sky/light** is a Preetham sky feeding a PMREM environment (re-baked on the
   time-of-day switch), with HDR bloom → ACES → a restrained grade.
 
