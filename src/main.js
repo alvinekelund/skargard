@@ -21,6 +21,7 @@ import { createAudio } from './audio.js';
 import { createChart } from './map.js';
 import { createGustField } from './wind.js';
 import { createShips, ROUTES } from './ships.js';
+import { createFleet } from './fleet.js';
 import { createLandmarks } from './landmarks.js';
 
 /* ── renderer / scene / camera ── */
@@ -69,6 +70,10 @@ const boat = createBoat(scene);
 // ship traffic on its real routes: Viking + Silja on the Turku–Åland fairway,
 // the yellow road ferry, and the Utö-line connection vessel
 const ships = createShips(scene);
+
+// ambient summer traffic that follows the helm — sloops actually sailing
+// (heeled, real sail shapes) + motor cruisers, all keeping off the rock
+const fleet = createFleet(scene, { heightAt: archipelago.heightAt });
 
 // recognisable city landmarks (Helsinki + Turku cathedrals) at real coordinates
 createLandmarks(scene);
@@ -245,6 +250,10 @@ function animate() {
   }
   archipelago.update(dt, perfT, camera, env.sunDir);
   ships.update(dt, perfT, env.waveHeightAt);
+  fleet.update(dt, perfT, {
+    playerPos: boat.state.pos, windHeading: gustHeading, windSpeed: wind.speed,
+    waveHeightAt: env.waveHeightAt,
+  });
   // stream the next region in as the boat sails on (brief hitch, ~every 1.2 km)
   {
     const c = archipelago.activeCenter;
