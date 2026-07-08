@@ -341,6 +341,186 @@ function gull() {
   return g;
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   REAL guest harbours (brief #3). Each of the famous ones the archipelago
+   crowd actually knows, at its real position (lat/lon → the same game frame
+   the map is baked in: x = (lon−21.49)·KX, z = −(lat−59.805)·KZ). We anchor
+   the layout to the real OSM pier when one is streamed nearby (so it sits on
+   the real quay and points down the real basin); otherwise we drop it at the
+   charted position and orient it into open water. Character — how many guest
+   pontoons, whether there's a fuel dock, the red boathouses, a harbour
+   café/restaurant — is set per harbour from the harbour guides, not pixel-
+   traced from the aerial, and it's dense because it's July.
+   ─────────────────────────────────────────────────────────────────────────── */
+// Each harbour's real position in the game frame (world x,z), taken from the
+// real OSM pier cluster at that guest harbour (verified against the baked
+// piers — every one has a real pier within ~600 m of the point below). We snap
+// the layout onto that pier so it sits on the real quay pointing down the real
+// basin. pontoons/fuel/boathouses/cafe are the character, from harbour guides.
+//   (Korpo/Verkan is left out until its quay is in the pier data — no fakery.)
+const HARBORS = [
+  { name: 'Nauvo',    wx: 23375, wz: -43059, pontoons: 3, len: 58, fuel: true,  boathouses: 2, cafe: true  },
+  { name: 'Utö',      wx: -6739, wz: 2684,   pontoons: 2, len: 34, fuel: true,  boathouses: 2, cafe: false },
+  { name: 'Jurmo',    wx: 5710,  wz: -2054,  pontoons: 1, len: 30, fuel: false, boathouses: 2, cafe: false },
+  { name: 'Nötö',     wx: 14828, wz: -16667, pontoons: 1, len: 28, fuel: false, boathouses: 3, cafe: false },
+  { name: 'Aspö',     wx: 6454,  wz: -16085, pontoons: 1, len: 26, fuel: false, boathouses: 2, cafe: false },
+  { name: 'Berghamn', wx: 17306, wz: -27547, pontoons: 2, len: 32, fuel: true,  boathouses: 2, cafe: false },
+];
+
+// a falun-red gabled boathouse (sjöbod) sitting at the shore, water-side door
+function boathouse(rng, w = 4.6, d = 5.6) {
+  const g = new THREE.Group();
+  const h = 2.4;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M.falunRed);
+  body.position.y = h / 2; body.castShadow = true; body.receiveShadow = true; g.add(body);
+  // gable roof (two slabs)
+  const rl = Math.hypot(w / 2, 1.3);
+  for (const s of [1, -1]) {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(rl + 0.1, 0.12, d + 0.5), M.roof);
+    slab.position.set(s * w / 4, h + 0.6, 0);
+    slab.rotation.z = s * Math.atan2(1.3, w / 2);
+    g.add(slab);
+  }
+  // big dark water-side door + white corner boards
+  const door = new THREE.Mesh(new THREE.BoxGeometry(w * 0.6, h * 0.8, 0.08), M.woodDark);
+  door.position.set(0, h * 0.42, d / 2 + 0.03); g.add(door);
+  for (const s of [1, -1]) {
+    const kn = new THREE.Mesh(new THREE.BoxGeometry(0.16, h, 0.16), M.white);
+    kn.position.set(s * (w / 2 - 0.08), h / 2, d / 2 - 0.08); g.add(kn);
+  }
+  return g;
+}
+
+// a guest-harbour building: the café/harbour office with a terrace rail —
+// pale timber with a red roof and a lit window band (dusk warmth)
+function harborBuilding(rng) {
+  const g = new THREE.Group();
+  const w = 9, d = 6, h = 3.2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M.white);
+  body.position.y = h / 2; body.castShadow = true; body.receiveShadow = true; g.add(body);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 1.0, 0.16, d + 1.0), M.roof);
+  roof.position.y = h + 0.08; g.add(roof);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 1.1, 0.06),
+    new THREE.MeshStandardMaterial({ color: 0x201a14, roughness: 0.4, emissive: 0xffc06a, emissiveIntensity: 0.6 }));
+  win.position.set(0, h * 0.55, d / 2 + 0.04); g.add(win);
+  // a small terrace deck out front with a rail
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 3), M.plank);
+  deck.position.set(0, 0.35, d / 2 + 1.5); g.add(deck);
+  for (let k = 0; k <= 6; k++) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.7, 5), M.wood);
+    post.position.set(-w / 2 + k * (w / 6), 0.7, d / 2 + 2.95); g.add(post);
+  }
+  return g;
+}
+
+// a diesel/petrol fuel dock: a short deck with a pump cabinet and a hose post
+function fuelDock(rng) {
+  const g = new THREE.Group();
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.16, 4.5), M.plank);
+  deck.position.y = 0.42; g.add(deck);
+  const pump = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.3, 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x1f6f3a, roughness: 0.5 }));
+  pump.position.set(0.7, 1.15, 0); g.add(pump);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 0.6), M.white);
+  cap.position.set(0.7, 1.86, 0); g.add(cap);
+  return g;
+}
+
+// lay out a whole guest harbour from an anchor on the shore (ax,az) and a
+// seaward axis (unit vector out into the basin). Fingers reach out over water,
+// boats berth both sides, boathouses + café sit inshore.
+function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
+  const [vx, vz] = axis;                 // seaward
+  const rx = vz, rz = -vx;               // abeam (along the shore)
+  const ang = Math.atan2(vx, vz);        // heading down the fingers
+
+  // march out from the shore anchor to where the water is deep enough to berth
+  // in, and put the walkway head there — the guest pontoons float in the basin,
+  // not on the shallow apron (harbours on gently-shelving shores broke otherwise)
+  let baseD = 6;
+  for (let d = 4; d <= 70; d += 3) { if (heightAt(ax + vx * d, az + vz * d) < -0.9) { baseD = d; break; } }
+  const bx = ax + vx * baseD, bz = az + vz * baseD;
+  const walkLen = Math.max(14, H.pontoons * 9 + 6);
+  const walk = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.18, walkLen), M.plank);
+  walk.position.set(bx, 0.42, bz); walk.rotation.y = ang + Math.PI / 2; walk.receiveShadow = true;
+  group.add(walk);
+
+  const gap = walkLen / (H.pontoons + 1);
+  for (let f = 0; f < H.pontoons; f++) {
+    const off = -walkLen / 2 + gap * (f + 1);
+    const fx = bx + rx * off, fz = bz + rz * off;
+    // clip the finger where the water shoals again on the far side of the basin
+    let len = H.len;
+    for (let d = 8; d <= H.len; d += 4) { if (heightAt(fx + vx * d, fz + vz * d) > -0.5) { len = d - 4; break; } }
+    if (len < 8) continue;
+    const cx = fx + vx * len / 2, cz = fz + vz * len / 2;
+    const finger = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, len), M.plank);
+    finger.position.set(cx, 0.44, cz); finger.rotation.y = ang; finger.receiveShadow = true;
+    group.add(finger);
+    const nPile = Math.max(1, Math.round(len / 6));
+    for (let p = 0; p <= nPile; p++) {
+      const t = p / nPile, plx = fx + vx * len * t, plz = fz + vz * len * t;
+      for (const s of [1, -1]) {
+        const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 1.4, 5), M.woodDark);
+        pile.position.set(plx + rx * 0.75 * s, -0.1, plz + rz * 0.75 * s); group.add(pile);
+      }
+    }
+    // berthed boats lying alongside the finger — it's July, the harbour is full
+    const nB = Math.floor(len / 5.5);
+    for (let k = 1; k <= nB; k++) {
+      const along = k * 5.5 - 2;
+      for (const s of [1, -1]) {
+        if (rng() < 0.16) continue;                       // a few open slips
+        const side = s * (3.0 + rng() * 0.7);
+        const boatX = fx + vx * along + rx * side, boatZ = fz + vz * along + rz * side;
+        if (heightAt(boatX, boatZ) > -0.6) continue;
+        const r = rng();
+        const b = r < 0.6 ? smallSailboat(rng) : r < 0.85 ? motorboat(rng) : rowboat(rng);
+        if (r < 0.6) b.scale.setScalar(1.35 + rng() * 0.8);       // yachts 8–13 m
+        else if (r < 0.85) b.scale.setScalar(1.15 + rng() * 0.5); // cruisers 6–8.5 m
+        if (rng() < 0.2) {                                        // someone aboard
+          const sitter = person(rng, true);
+          if (r < 0.6) sitter.position.set(0, -0.31, -1.15);
+          else if (r < 0.85) sitter.position.set(0, -0.16, -0.72);
+          else sitter.position.set(0, -0.46, -0.45);
+          sitter.scale.multiplyScalar(1 / b.scale.x);
+          b.add(sitter);
+        }
+        b.position.set(boatX, 0, boatZ);
+        b.rotation.y = ang + (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.12;  // parallel to the finger
+        group.add(b); dyn.moored.push(b);
+      }
+    }
+  }
+
+  // fuel dock off the first finger
+  if (H.fuel) {
+    const off = -walkLen / 2 + gap;
+    const fx = bx + rx * off + vx * (H.len * 0.5), fz = bz + rz * off + vz * (H.len * 0.5);
+    if (heightAt(fx, fz) < -0.5) {
+      const fd = fuelDock(rng); fd.position.set(fx, 0, fz); fd.rotation.y = ang; group.add(fd);
+    }
+  }
+  // march inshore from a point until it sits on dry land (harbour buildings
+  // must never float): step against the seaward axis until height clears
+  const onLand = (sx, sz, min) => {
+    for (let d = 0; d <= 24; d += 2) { const gy = heightAt(sx - vx * d, sz - vz * d); if (gy > min) return [sx - vx * d, sz - vz * d, gy]; }
+    return null;
+  };
+  // red boathouses at the root, gables to the water
+  for (let k = 0; k < H.boathouses; k++) {
+    const off = -walkLen / 2 + (k + 0.5) * (walkLen / H.boathouses);
+    const spot = onLand(ax + rx * off, az + rz * off, 0.4);
+    if (!spot) continue;
+    const bh = boathouse(rng); bh.position.set(spot[0], spot[2], spot[1]); bh.rotation.y = ang; group.add(bh);
+  }
+  // harbour café / office with its terrace, set back on the shore
+  if (H.cafe) {
+    const spot = onLand(ax + rx * (walkLen * 0.18), az + rz * (walkLen * 0.18), 0.6);
+    if (spot) { const hb = harborBuilding(rng); hb.position.set(spot[0], spot[2], spot[1]); hb.rotation.y = ang + Math.PI; group.add(hb); }
+  }
+}
+
 export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
@@ -688,6 +868,33 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       }
       segs++;
     }
+  }
+
+  // ── REAL guest harbours: when the streamed region reaches one of the famous
+  //    spots, snap its layout onto the nearest real OSM pier (within 600 m of
+  //    the charted harbour). The pier gives the real quay position + basin
+  //    orientation; we never float a harbour where there's no pier. ──
+  for (const H of HARBORS) {
+    if ((H.wx - center.x) ** 2 + (H.wz - center.y) ** 2 > 2200 * 2200) continue;   // only the one we're near
+    let bestLine = null, bestPD = 600 * 600;
+    for (const line of (region.piers || [])) {
+      if (!line.some(([qx, qz]) => heightAt(qx, qz) > -1.6)) continue;              // must reach land
+      for (const [px, pz] of line) {
+        const dd = (px - H.wx) ** 2 + (pz - H.wz) ** 2;
+        if (dd < bestPD) { bestPD = dd; bestLine = line; }
+      }
+    }
+    if (!bestLine) continue;
+    // landward end (highest) → anchor · seaward end (deepest) → basin direction
+    let land = null, lh = -1e9, sea = null, sd = 1e9;
+    for (const [px, pz] of bestLine) {
+      const h = heightAt(px, pz);
+      if (h > lh) { lh = h; land = [px, pz]; }
+      if (h < sd) { sd = h; sea = [px, pz]; }
+    }
+    let vx = sea[0] - land[0], vz = sea[1] - land[1];
+    const vl = Math.hypot(vx, vz) || 1;
+    buildHarbor(group, dyn, rng, heightAt, H, land[0], land[1], [vx / vl, vz / vl]);
   }
 
   // ── Utö extras: the pilot station + radar mast on the real island ──
