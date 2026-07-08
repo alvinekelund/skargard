@@ -77,7 +77,7 @@ createLandmarks(scene);
 const chart = createChart(mapData, {
   getBoat: () => boat.state,
   getShips: () => ships.markers(),
-  realData, routes: ROUTES,
+  realData, roadsData, routes: ROUTES,
   onTeleport: (x, z) => {
     boat.state.pos.set(x, 0, z);
     boat.state.speed = Math.min(boat.state.speed, 1);

@@ -4,7 +4,12 @@
    there. Toggled with M.
    ─────────────────────────────────────────────────────────────────────────── */
 
-export function createChart(mapData, { getBoat, onTeleport, realData = null, routes = null, getShips = null }) {
+export function createChart(mapData, { getBoat, onTeleport, realData = null, roadsData = null, routes = null, getShips = null }) {
+  const roads = ((roadsData && roadsData.roads) || []).map((r) => {
+    let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9;
+    for (const [x, z] of r.p) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (z < minZ) minZ = z; if (z > maxZ) maxZ = z; }
+    return { c: r.c, p: r.p, minX, minZ, maxX, maxZ };
+  });
   const SHIP_COL = { viking: '#e0524a', silja: '#5b8fd6', roadferry: '#f2c218', utoline: '#e8b414' };
   const islands = mapData.islands.map((rec) => {
     const pts = rec.p;
@@ -73,6 +78,22 @@ export function createChart(mapData, { getBoat, onTeleport, realData = null, rou
       ctx.moveTo(sx(isl.p[0][0]), sz(isl.p[0][1]));
       for (let i = 1; i < isl.p.length; i++) ctx.lineTo(sx(isl.p[i][0]), sz(isl.p[i][1]));
       ctx.closePath(); ctx.fill();
+    }
+
+    // the road network on the land — major roads darker/wider, minor lanes
+    // thinner; drawn once the chart is zoomed enough to read them
+    if (roads.length && k > 0.006) {
+      const vminX = wx(0), vmaxX = wx(W / devicePixelRatio), vminZ = wz(0), vmaxZ = wz(H / devicePixelRatio);
+      for (const rd of roads) {
+        if (rd.maxX < vminX || rd.minX > vmaxX || rd.maxZ < vminZ || rd.minZ > vmaxZ) continue;
+        ctx.strokeStyle = rd.c === 1 ? 'rgba(60,62,68,0.9)' : 'rgba(70,66,60,0.7)';
+        ctx.lineWidth = (rd.c === 1 ? 2.2 : 1.2) * devicePixelRatio;
+        const p = rd.p;
+        ctx.beginPath();
+        ctx.moveTo(sx(p[0][0]), sz(p[0][1]));
+        for (let i = 1; i < p.length; i++) ctx.lineTo(sx(p[i][0]), sz(p[i][1]));
+        ctx.stroke();
+      }
     }
 
     // ferry lanes: the real routes the traffic sails, as faint dashed tracks

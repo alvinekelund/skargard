@@ -1272,11 +1272,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // (the chart draws some islands smaller than the road network knows them).
   function buildRoadMesh(regionRoads) {
     const pos = [], col = [], idx = [], bridges = [];
-    // pale sandy gravel — Finnish archipelago roads are light cuts that
-    // read clearly against forest and granite, not asphalt-grey camouflage
-    const cMajor = new THREE.Color(0xbfb090), cMinor = new THREE.Color(0xab9d80);
+    // asphalt: dark grey with a warm-grey shoulder on minor lanes
+    const cMajor = new THREE.Color(0x3b3d42), cMinor = new THREE.Color(0x47443f);
     for (const rd of regionRoads) {
-      const hw = rd.c === 1 ? 2.6 : 1.7;
+      const hw = rd.c === 1 ? 2.8 : 1.8;
       const cc = rd.c === 1 ? cMajor : cMinor;
       // a road lives on one island (occasionally two) — probe only those,
       // not every island in the region, or draping costs seconds at Nauvo
@@ -1353,7 +1352,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // bridges where the roads span sounds — slim concrete beam bridges the way
   // the archipelago actually has them: a deck slab with edge beams and a light
   // railing, on slender capped piers, gently arched so small boats pass under.
-  const CB_TOP = new THREE.Color(0xb0a487);   // gravel road surface (matches the road)
+  const CB_TOP = new THREE.Color(0x3b3d42);   // asphalt carriageway (matches the road)
   const CB_SLAB = new THREE.Color(0xb3afa4);  // pale concrete slab / fascia
   const CB_PIER = new THREE.Color(0xa6a298);  // pier concrete
   const CB_RAIL = new THREE.Color(0x8f8b83);  // light metal rail
@@ -1372,7 +1371,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const dx = (bx - ax) / len, dz = (bz - az) / len;         // along span
       const px = -dz, pz = dx;                                  // across deck
       const hw = br.hw + 0.5, depth = 0.55;                     // deck half-width, slab depth
-      const clr = Math.min(2.4 + len * 0.013, 6.5);            // gentler arch
+      // clearance scales with the span: a narrow sound stays low (~4 m), a wide
+      // channel is a real boat route and rides high so a masted yacht / small
+      // ship passes under (up to ~22 m, like the archipelago's main bridges)
+      const clr = THREE.MathUtils.clamp(3.2 + len * 0.055, 4, 22);
       const N = Math.max(6, Math.round(len / 8));
       const y0 = br.a[1] + 0.2, y1 = br.b[1] + 0.2;
       const yat = (t) => y0 + (y1 - y0) * t + Math.sin(Math.PI * t) * clr;
