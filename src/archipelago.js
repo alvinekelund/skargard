@@ -242,15 +242,19 @@ function pineGeometry(rng) {
 
 // a loose, airy birch crown — irregular clustered blobs, muted leaf green, white trunk
 function birchGeometry(rng) {
-  const trunkG = new THREE.CylinderGeometry(0.04, 0.07, 3.3, 5); trunkG.translate(0, 1.65, 0);
+  const trunkG = new THREE.CylinderGeometry(0.055, 0.085, 3.0, 6); trunkG.translate(0, 1.5, 0);
   const trunk = paint(trunkG, COL.birchBark);
   const parts = [];
+  // a fuller, droopier birch crown that clothes the upper trunk instead of a
+  // tight blob on a bare white pole — lower skirt blobs + a taller core, wider
+  // and slightly flattened so it reads as an airy broadleaf, not a lollipop
   const blobs = [
-    [0, 3.3, 0, 0.95], [0.62, 3.05, 0.32, 0.66], [-0.54, 3.15, -0.3, 0.68],
-    [0.22, 3.75, -0.22, 0.6], [-0.32, 3.62, 0.42, 0.55], [0.36, 4.12, 0.12, 0.46],
+    [0, 2.75, 0, 1.08], [0.78, 2.5, 0.4, 0.8], [-0.7, 2.58, -0.38, 0.82],
+    [0.28, 3.2, -0.28, 0.72], [-0.4, 3.08, 0.52, 0.66], [0.42, 3.55, 0.16, 0.56],
+    [-0.2, 2.2, 0.34, 0.66], [0.34, 2.24, -0.46, 0.62], [0, 3.85, 0, 0.42],
   ];
   for (const [x, y, z, r] of blobs) {
-    const s = new THREE.IcosahedronGeometry(r, 1); s.scale(1, 0.92, 1); s.translate(x, y, z);
+    const s = new THREE.IcosahedronGeometry(r, 1); s.scale(1.15, 0.9, 1.15); s.translate(x, y, z);
     parts.push(paint(s, COL.birchLeaf.clone().offsetHSL((rng() - 0.5) * 0.02, -0.06, (rng() - 0.5) * 0.09)));
   }
   return { trunk, canopy: BufferGeometryUtils.mergeGeometries(parts, false) };

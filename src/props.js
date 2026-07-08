@@ -10,9 +10,9 @@ import { mulberry32 } from './noise.js';
 let _urbanFacade = null;
 function urbanFacade() {
   if (_urbanFacade) return _urbanFacade;
-  const N = 5, CELL = 48, S = N * CELL;
-  const alb = document.createElement('canvas'); alb.width = alb.height = S;
-  const emi = document.createElement('canvas'); emi.width = emi.height = S;
+  const N = 8, CELL = 48, S = N * CELL;                    // 8×8 → the pattern repeats
+  const alb = document.createElement('canvas'); alb.width = alb.height = S;   // every 8 panes, not 5,
+  const emi = document.createElement('canvas'); emi.width = emi.height = S;   // killing the obvious grid tile
   const a = alb.getContext('2d'), e = emi.getContext('2d');
   a.fillStyle = '#f2efe8'; a.fillRect(0, 0, S, S);        // plaster wall (tint-ready)
   e.fillStyle = '#000'; e.fillRect(0, 0, S, S);
@@ -29,8 +29,10 @@ function urbanFacade() {
     a.strokeStyle = '#e7e2d6'; a.lineWidth = 2;
     a.beginPath(); a.moveTo(mx + mw / 2, my); a.lineTo(mx + mw / 2, my + mh);
     a.moveTo(mx, my + mh * 0.5); a.lineTo(mx + mw, my + mh * 0.5); a.stroke();
-    if (rnd() < 0.34) {                                    // a lit window
-      e.fillStyle = 'rgba(255,205,130,0.95)'; e.fillRect(mx, my, mw, mh);
+    if (rnd() < 0.3) {                                     // a lit window — warmth + brightness vary
+      const warm = 175 + rnd() * 70, br = 0.6 + rnd() * 0.38;
+      e.fillStyle = `rgba(255,${205 - (215 - warm) * 0.4 | 0},${warm | 0},${br.toFixed(2)})`;
+      e.fillRect(mx, my, mw, mh);
     }
   }
   const map = new THREE.CanvasTexture(alb); map.colorSpace = THREE.SRGBColorSpace;
