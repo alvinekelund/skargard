@@ -1115,7 +1115,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             ty = islandHeight(wx - cx, wz - cz, isl);
             if (ty < 0.12 || ty > H + 4.5) continue;
           }
-          const isBirch = treeRng() < 0.13;      // conifer dominant, birch the accent
+          // birch lines the moist shores and hollows and thins out up on the dry
+          // exposed rock — so a shore reads deciduous-fringed, the uplands coniferous
+          const pBirch = exposed ? 0.05 : Math.min(0.32, Math.max(0.08, 0.28 - ty * 0.018));
+          const isBirch = treeRng() < pBirch;    // conifer dominant, birch the accent
           const isScots = !isBirch && (treeRng() < 0.8 ? standScots : !standScots);
           const vig = ci === 0 ? 1.0 : 0.68 + treeRng() * 0.32;
           const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity * vig;
