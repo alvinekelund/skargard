@@ -428,6 +428,55 @@ function fuelDock(rng) {
   return g;
 }
 
+// the Finnish flag — white field, blue Nordic cross — on canvas, shared
+let _flagTex = null;
+function flagTexture() {
+  if (_flagTex) return _flagTex;
+  const cv = document.createElement('canvas'); cv.width = 72; cv.height = 44;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#f4f5f6'; c.fillRect(0, 0, 72, 44);
+  c.fillStyle = '#1d3f8f';                          // Siniristilippu blue
+  c.fillRect(20, 0, 14, 44); c.fillRect(0, 15, 72, 14);
+  _flagTex = new THREE.CanvasTexture(cv); _flagTex.colorSpace = THREE.SRGBColorSpace;
+  return _flagTex;
+}
+// a flagpole flying the Finnish flag, gently curved as if in the breeze
+function flagpole(rng) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 8, 6), M.white);
+  pole.position.y = 4; pole.castShadow = true; g.add(pole);
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), M.steel)).position.set(0, 8.05, 0);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.1, 6, 1), new THREE.MeshStandardMaterial({
+    map: flagTexture(), side: THREE.DoubleSide, roughness: 0.85 }));
+  // curve the flag so it reads as cloth, hoist at the pole
+  const p = flag.geometry.attributes.position;
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i); p.setZ(i, Math.sin((x + 0.9) * 1.4) * 0.12 * (x + 0.9)); }
+  flag.geometry.computeVertexNormals();
+  flag.position.set(0.9, 7.0, 0); g.add(flag);
+  return g;
+}
+
+// a little shore sauna — the most Finnish thing on any waterfront: a small
+// timber hut right at the water with a stovepipe (and a swim ladder implied)
+function sauna(rng) {
+  const g = new THREE.Group();
+  const wall = rng() < 0.6 ? M.falunRed : M.woodDark;
+  const w = 3.4, d = 3.0, h = 2.3;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wall);
+  body.position.y = h / 2; body.castShadow = true; body.receiveShadow = true; g.add(body);
+  for (const s of [1, -1]) {                         // shallow gable roof
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(w / 2, 0.9) + 0.1, 0.1, d + 0.4), M.roof);
+    slab.position.set(s * w / 4, h + 0.42, 0); slab.rotation.z = s * Math.atan2(0.9, w / 2); g.add(slab);
+  }
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.7, 0.06), M.woodDark);
+  door.position.set(0, 0.85, d / 2 + 0.03); g.add(door);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.06), M.glass);
+  win.position.set(-1.0, 1.35, d / 2 + 0.03); g.add(win);
+  const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.1, 6), M.steel);
+  pipe.position.set(w / 2 - 0.5, h + 0.9, 0); g.add(pipe);                 // stovepipe
+  return g;
+}
+
 // lay out a whole guest harbour from an anchor on the shore (ax,az) and a
 // seaward axis (unit vector out into the basin). Fingers reach out over water,
 // boats berth both sides, boathouses + café sit inshore.
@@ -520,6 +569,14 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
   if (H.cafe) {
     const spot = onLand(ax + rx * (walkLen * 0.18), az + rz * (walkLen * 0.18), 0.6);
     if (spot) { const hb = harborBuilding(rng); hb.position.set(spot[0], spot[2], spot[1]); hb.rotation.y = ang + Math.PI; group.add(hb); }
+  }
+  // a flagpole flying the Finnish flag by the head of the quay — every guest
+  // harbour has one — and a little shore sauna (the most Finnish detail there is)
+  const fspot = onLand(ax + rx * (walkLen * 0.42), az + rz * (walkLen * 0.42), 0.5);
+  if (fspot) { const fp = flagpole(rng); fp.position.set(fspot[0], fspot[2], fspot[1]); group.add(fp); }
+  if (rng() < 0.8) {
+    const sspot = onLand(ax - rx * (walkLen * 0.5), az - rz * (walkLen * 0.5), 0.4);
+    if (sspot) { const sa = sauna(rng); sa.position.set(sspot[0], sspot[2], sspot[1]); sa.rotation.y = ang + (rng() - 0.5) * 0.5; group.add(sa); }
   }
 }
 
