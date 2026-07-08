@@ -43,16 +43,16 @@ function makeSailMaterial(phase = 0) {
           float span = 1.0 - 0.65 * aSail.y;             // calmer toward the head
           transformed.z += uFlap * 0.28 * edge * span * flogW(aSail, t);
           transformed.x -= uFlap * 0.05 * edge * sin(23.0*t + 6.0*aSail.y); }`);
-    // faint cross-cut panel seams + reinforced leech/corner tabling, so the
-    // cloth reads as sewn panels rather than one blank sheet
+    // reinforced leech/corner tabling only — horizontal panel seams wrap the
+    // cambered sail into a chevron weave when viewed edge-on (the common POV),
+    // so a smooth sail with just a darker leech edge reads cleaner as cloth
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\n        varying vec2 vSail;')
       .replace('#include <color_fragment>', `#include <color_fragment>
-        { float fy = fract(vSail.y * 9.0);                    // 9 horizontal panels
-          float d = min(fy, 1.0 - fy);
-          diffuseColor.rgb *= mix(0.86, 1.0, smoothstep(0.0, 0.03, d));
-          float leech = smoothstep(0.95, 1.0, vSail.x);       // darker tabling up the leech
-          diffuseColor.rgb *= mix(1.0, 0.93, leech); }`);
+        { float leech = smoothstep(0.955, 1.0, vSail.x);      // darker tabling band up the leech
+          diffuseColor.rgb *= mix(1.0, 0.94, leech);
+          float foot = smoothstep(0.03, 0.0, vSail.y);        // and along the foot
+          diffuseColor.rgb *= mix(1.0, 0.95, foot); }`);
   };
   return m;
 }
@@ -338,7 +338,7 @@ export function buildSwan36({ withSails = true } = {}) {
   // cloth, not cardboard. All points given as (x, y) in the centreline plane.
   const V2 = (x, y) => new THREE.Vector2(x, y);
   function sailMesh(tack, head, clew, leechCtrl, belly, phase = 0) {
-    const R = 22, K = 18;                              // finer grid: the deeper belly stays smooth, not faceted
+    const R = 30, K = 26;                              // fine grid so the cambered belly never facets under a grazing sun
     const leech = new THREE.QuadraticBezierCurve(clew, leechCtrl, head);
     const rings = [];
     for (let i = 0; i <= R; i++) {
