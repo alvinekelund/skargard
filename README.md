@@ -39,7 +39,13 @@ npm run dev      # → http://localhost:5183
   real Turku–Åland fairway across the north of the chart, a yellow road ferry
   shuttles its short crossing, and the yellow Utö-line connection vessel passes
   Nötö and Aspö on her way south — all on water-validated real routes (dashed on
-  the chart). The running rigging is simulated rope: sheets sag, sway with the
+  the chart). And it's July, so the water around you is never empty: a fleet of
+  other yachts is actually *sailing* — heeled to leeward with real main + headsail
+  on a valid point of sail, on varied courses — alongside motor cruisers, all
+  keeping off the rock the same way your hull does. The famous **guest harbours**
+  (Utö, Jurmo, Nötö, Aspö, Berghamn, Nauvo) are built on their real OSM quays:
+  pontoon fingers packed with berthed boats, red boathouses, a fuel dock. The
+  running rigging is simulated rope: sheets sag, sway with the
   heel, and swap working/lazy sides when you tack. The companionway is open —
   there's a lamp lit below.
 - **The chart is real**: every island is an actual OSM coastline polygon from the
