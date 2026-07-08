@@ -904,8 +904,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     group.add(bodies);
   }
   if (winGeos.length) {
+    // warm lamplight in the village windows — turned up so the shore cottages
+    // glow at golden hour (the cosy summer-evening read), just under the golden
+    // bloom threshold so they twinkle rather than flare
     const wins = new THREE.Mesh(mergeGeometries(winGeos.map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
-      new THREE.MeshStandardMaterial({ color: 0x201a14, roughness: 0.4, emissive: 0xffc06a, emissiveIntensity: 0.5 }));
+      new THREE.MeshStandardMaterial({ color: 0x2a2016, roughness: 0.4, emissive: 0xffbf72, emissiveIntensity: 1.15 }));
     group.add(wins);
   }
   // urban city facades: one merged, single-texture mesh — pastel plaster tinted
