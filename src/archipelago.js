@@ -28,11 +28,14 @@ const COL = {
   floor:  new THREE.Color(0x44502d), // mossy forest floor (under real wood polys)
   scrubG: new THREE.Color(0x4b5a38), // grey-green juniper scrub carpet
   field:  new THREE.Color(0x91945c), // open dry meadow (satellite 'field' class)
-  pine:   new THREE.Color(0x1f3a1e),
-  pineDk: new THREE.Color(0x122610),
+  pine:   new THREE.Color(0x24401f), // spruce (kuusi): deep blue-green, lifted off black
+  pineDk: new THREE.Color(0x16290f),
+  scots:  new THREE.Color(0x4a6330), // Scots pine (mänty): lighter olive-green, sun-warmed
+  scotsDk:new THREE.Color(0x33481f),
+  pineBark:new THREE.Color(0x9c5f36), // Scots pine's warm reddish-orange upper bark
   juniper:new THREE.Color(0x36482e), // low dark-green shore bush
-  birchLeaf: new THREE.Color(0x74853e),
-  birchBark: new THREE.Color(0xbeb9ac),
+  birchLeaf: new THREE.Color(0x84923f),
+  birchBark: new THREE.Color(0xcac6ba),
   trunk:  new THREE.Color(0x51402f), // grey-brown bark, not black (reads at distance)
   rim:    new THREE.Color(0xffc98a),
 };
@@ -81,6 +84,22 @@ function paint(geo, color) {
   geo = geo.index ? geo.toNonIndexed() : geo;
   const c = new Float32Array(geo.attributes.position.count * 3);
   for (let i = 0; i < geo.attributes.position.count; i++) { c[i*3]=color.r; c[i*3+1]=color.g; c[i*3+2]=color.b; }
+  geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return geo;
+}
+
+// paint a trunk with a vertical gradient (base colour → top colour by height y):
+// Scots pine goes grey-brown at the foot to warm reddish-orange up the bole
+function paintGradient(geo, lo, hi, y0, y1) {
+  geo = geo.index ? geo.toNonIndexed() : geo;
+  const pos = geo.attributes.position;
+  const c = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp((pos.getY(i) - y0) / (y1 - y0), 0, 1);
+    tmp.copy(lo).lerp(hi, t);
+    c[i*3]=tmp.r; c[i*3+1]=tmp.g; c[i*3+2]=tmp.b;
+  }
   geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return geo;
 }
@@ -236,6 +255,31 @@ function pineGeometry(rng) {
     cone.translate((rng() - 0.5) * 0.07, y, (rng() - 0.5) * 0.07); // slight per-tier wobble
     parts.push(paint(cone, COL.pine.clone().lerp(COL.pineDk, 0.35 + t * 0.5).offsetHSL(0, 0, (rng() - 0.5) * 0.04)));
     y += h * 0.46;                                              // heavy overlap → continuous spire
+  }
+  return { trunk, canopy: BufferGeometryUtils.mergeGeometries(parts, false) };
+}
+
+// a Scots pine (mänty) — the tree that clothes the bare rock of the outer
+// archipelago: a tall, near-bare bole going warm reddish-orange up its length,
+// with an open, broad, slightly flat-topped crown of a few rounded needle
+// tufts gathered in the top third. Reads quite different from the dense dark
+// spruce spire, which is what gives a real archipelago wood its mixed texture.
+function scotsPineGeometry(rng) {
+  const trunkH = 2.8;
+  const trunkG = new THREE.CylinderGeometry(0.05, 0.13, trunkH, 6); trunkG.translate(0, trunkH / 2, 0);
+  const trunk = paintGradient(trunkG, COL.trunk, COL.pineBark, trunkH * 0.15, trunkH * 0.95);
+  const parts = [];
+  // crown tufts clustered high, wide and flattened → an umbrella, not a spire
+  const blobs = [
+    [0, 3.0, 0, 1.05], [0.66, 2.78, 0.36, 0.74], [-0.6, 2.82, -0.32, 0.72],
+    [0.32, 3.34, -0.36, 0.66], [-0.34, 3.22, 0.42, 0.6], [0.1, 3.66, 0.06, 0.5],
+  ];
+  for (const [x, y, z, r] of blobs) {
+    const s = new THREE.IcosahedronGeometry(r, 1);
+    s.scale(1.28, 0.66, 1.28);                                   // broad and flat
+    s.translate(x + (rng() - 0.5) * 0.12, y, z + (rng() - 0.5) * 0.12);
+    parts.push(paint(s, COL.scots.clone().lerp(COL.scotsDk, 0.2 + rng() * 0.45)
+      .offsetHSL((rng() - 0.5) * 0.02, (rng() - 0.5) * 0.05, (rng() - 0.5) * 0.06)));
   }
   return { trunk, canopy: BufferGeometryUtils.mergeGeometries(parts, false) };
 }
@@ -661,6 +705,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const leafTex = leafTexture(78); leafTex.repeat.set(2, 2);
   const pineMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.82, sway: 0.08, swayLo: 1.2, swayHi: 4.4, rimStrength: 0.5 });
   pineMat.map = needleTex; pineMat.alphaTest = 0.45; pineMat.side = THREE.DoubleSide;
+  // Scots pine crown: same needle texture, a touch softer and more sun-lit than
+  // the dark spruce, and it sways a little more (its open crown catches wind)
+  const scotsMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.78, sway: 0.11, swayLo: 1.6, swayHi: 4.4, rimStrength: 0.6 });
+  scotsMat.map = needleTex; scotsMat.alphaTest = 0.42; scotsMat.side = THREE.DoubleSide;
   const birchMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.7, sway: 0.13, swayLo: 1.0, swayHi: 4.5, rimStrength: 0.45 });
   birchMat.map = leafTex; birchMat.alphaTest = 0.4; birchMat.side = THREE.DoubleSide;
   const trunkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, envMapIntensity: 0.3 });
@@ -773,6 +821,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const reedMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.85, sway: 0.22, swayLo: 0.0, swayHi: 0.6, rimStrength: 0.5 });
   reedMat.map = reedTex; reedMat.alphaTest = 0.26; reedMat.side = THREE.DoubleSide;
   const pineGeo = pineGeometry(mulberry32(1));
+  const scotsGeo = scotsPineGeometry(mulberry32(11));
   const birchGeo = birchGeometry(mulberry32(2));
   const juniperGeo = juniperGeometry(mulberry32(3));
   const boulderGeo = boulderGeometry(mulberry32(4));
@@ -780,7 +829,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const reedGeo = reedGeometry();
   const slabGeo = slabGeometry(mulberry32(6));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
-  let pineMats = [], birchMats = [], juniperMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
+  let pineMats = [], scotsMats = [], birchMats = [], juniperMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
   // ── islands from the REAL chart: every polygon is an actual island outline
@@ -1045,6 +1094,14 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         const clump = isl.A > 120000 ? 3 + Math.floor(treeRng() * 4)
                     : isl.A > 20000  ? 2 + Math.floor(treeRng() * 3)
                                      : 1 + Math.floor(treeRng() * 2);
+        // a stand leans to ONE dominant conifer, as real ones do: Scots pine
+        // takes the thin-soiled rock (small/exposed islands), spruce the
+        // sheltered hollows of the big wooded islands — with the minority
+        // species sprinkled through for a mixed wood, never a monoculture
+        const pScots = isl.A > 600000 ? 0.42 : isl.A > 120000 ? 0.56 : isl.A > 20000 ? 0.72 : 0.84;
+        const standScots = treeRng() < pScots;
+        const exposed = isl.A < 20000;           // outer skerry → wind-flagged, leaning trees
+        const windLean = 2.15 + Math.sin(isl.x * 0.0007 + isl.z * 0.0009) * 0.6;  // prevailing SW, per island
         for (let ci = 0; ci < clump && placed < target; ci++) {
           let wx = cx + lx, wz = cz + lz, ty = y;
           if (ci > 0) {                          // companions tight around the seed
@@ -1053,16 +1110,24 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             ty = islandHeight(wx - cx, wz - cz, isl);
             if (ty < 0.12 || ty > H + 4.5) continue;
           }
-          const isBirch = treeRng() < 0.13;      // pine dominant, birch the accent
+          const isBirch = treeRng() < 0.13;      // conifer dominant, birch the accent
+          const isScots = !isBirch && (treeRng() < 0.8 ? standScots : !standScots);
           const vig = ci === 0 ? 1.0 : 0.68 + treeRng() * 0.32;
           const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity * vig;
           _p.set(wx, ty - 0.2, wz);
-          // pines are slender spires: taller than wide, so 25 m doesn't read as a blob
-          const wob = 0.6 + treeRng() * 0.22;
-          _s.set(sc * wob, sc, sc * wob);
-          _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+          // spruce is a slender spire (tall > wide); Scots pine carries a broader,
+          // open crown, so it stays wider and reads as a different tree
+          const wob = isScots ? 0.78 + treeRng() * 0.24 : 0.58 + treeRng() * 0.22;
+          _s.set(sc * wob, sc * (isScots ? 0.94 : 1.0), sc * wob);
+          if (exposed) {                         // wind-flag the outer-rock trees
+            const lean = (0.12 + treeRng() * 0.16);
+            _q.setFromAxisAngle(new THREE.Vector3(Math.cos(windLean), 0, Math.sin(windLean)), lean);
+            _q.multiply(new THREE.Quaternion().setFromAxisAngle(_up, treeRng() * Math.PI * 2));
+          } else {
+            _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+          }
           _m.compose(_p, _q, _s);
-          (isBirch ? birchMats : pineMats).push(_m.clone());
+          (isBirch ? birchMats : isScots ? scotsMats : pineMats).push(_m.clone());
           placed++;
         }
       }
@@ -1285,9 +1350,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, pineMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const m of [islandMat, pineMat, scotsMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
-  for (const g of [pineGeo.trunk, pineGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
+  for (const g of [pineGeo.trunk, pineGeo.canopy, scotsGeo.trunk, scotsGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
 
   function makeInstanced(geo, mat, mats, depthMat = null) {
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(mats.length, 1));
@@ -1508,7 +1573,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
-    geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
+    geoParts = []; pineMats = []; scotsMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 23000;                   // region-wide cap: near islands (sorted first) win
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
@@ -1587,6 +1652,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
     makeInstanced(pineGeo.trunk, trunkMat, pineMats);
     makeInstanced(pineGeo.canopy, pineMat, pineMats, depthNeedle);
+    makeInstanced(scotsGeo.trunk, trunkMat, scotsMats);
+    makeInstanced(scotsGeo.canopy, scotsMat, scotsMats, depthNeedle);
     makeInstanced(birchGeo.trunk, trunkMat, birchMats);
     makeInstanced(birchGeo.canopy, birchMat, birchMats, depthLeaf);
     makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf);
