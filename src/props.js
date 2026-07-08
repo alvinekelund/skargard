@@ -2,6 +2,52 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32 } from './noise.js';
 
+// ── shared city-facade texture: a grid of windows on a white wall (white so a
+//    per-building vertex tint shows through as the wall colour). Baked lit/dark
+//    variation across a 5×5 window tile breaks the institutional uniformity;
+//    the emissive map lights a scatter of windows for dusk. One texture → all
+//    urban blocks merge into a single draw call. ──
+let _urbanFacade = null;
+function urbanFacade() {
+  if (_urbanFacade) return _urbanFacade;
+  const N = 5, CELL = 48, S = N * CELL;
+  const alb = document.createElement('canvas'); alb.width = alb.height = S;
+  const emi = document.createElement('canvas'); emi.width = emi.height = S;
+  const a = alb.getContext('2d'), e = emi.getContext('2d');
+  a.fillStyle = '#f2efe8'; a.fillRect(0, 0, S, S);        // plaster wall (tint-ready)
+  e.fillStyle = '#000'; e.fillRect(0, 0, S, S);
+  let seed = 9;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const x = c * CELL, y = r * CELL;
+    const mx = x + CELL * 0.24, my = y + CELL * 0.2, mw = CELL * 0.52, mh = CELL * 0.6;
+    // window recess + glass; a horizontal + vertical mullion → paned "cuter" window
+    a.fillStyle = '#e7e2d6'; a.fillRect(mx - 2, my - 2, mw + 4, mh + 4);   // light frame
+    const glass = rnd();
+    a.fillStyle = glass < 0.5 ? '#59636b' : '#6b757c';     // cool grey glass, varied
+    a.fillRect(mx, my, mw, mh);
+    a.strokeStyle = '#e7e2d6'; a.lineWidth = 2;
+    a.beginPath(); a.moveTo(mx + mw / 2, my); a.lineTo(mx + mw / 2, my + mh);
+    a.moveTo(mx, my + mh * 0.5); a.lineTo(mx + mw, my + mh * 0.5); a.stroke();
+    if (rnd() < 0.34) {                                    // a lit window
+      e.fillStyle = 'rgba(255,205,130,0.95)'; e.fillRect(mx, my, mw, mh);
+    }
+  }
+  const map = new THREE.CanvasTexture(alb); map.colorSpace = THREE.SRGBColorSpace;
+  const emiMap = new THREE.CanvasTexture(emi);
+  for (const t of [map, emiMap]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
+  _urbanFacade = { map, emiMap, N };
+  return _urbanFacade;
+}
+// a wall plane textured with the window grid; UVs repeat so panes stay ~2.4 m
+function urbanWall(w, h, tileWorld) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv;
+  const ru = w / tileWorld, rv = h / tileWorld;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
+  return g;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Life for the archipelago, rebuilt with each streamed region:
    · IALA-A lateral spar buoys marking the channels between big islands
@@ -355,7 +401,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   //    Proper Finnish timber houses now: stone plinth, wall, GABLED roof with
   //    the ridge along the long axis and real eaves, a chimney on dwellings,
   //    and warm lit windows — everything merged into two draw calls. ──
-  const bodyGeos = [], winGeos = [];
+  const bodyGeos = [], winGeos = [], urbanGeos = [];
   const paintGeo = (geo, color) => {
     geo = geo.index ? geo.toNonIndexed() : geo;
     const n = geo.attributes.position.count;
@@ -370,11 +416,13 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   const C_ROOF = new THREE.Color(0x3a3532), C_ROOF2 = new THREE.Color(0x51413a), C_TILE = new THREE.Color(0x6e3a2c);
   const C_PLINTH = new THREE.Color(0x77726a), C_CHIM = new THREE.Color(0xcfcac0);
   const C_TRIM = new THREE.Color(0xf0ebdc), C_DOOR = new THREE.Color(0x4a3b2a);
-  // Nordic city-facade palette (rendered/plastered): cream, ochre, pale grey,
-  // terracotta, sand, blue-grey, muted rose — Helsinki/Turku Jugend + funkis
-  const URBAN = [0xd9d2c2, 0xcdb98d, 0xc9c3b8, 0xcaa58a, 0xc7b78f, 0xbfc3c2, 0xc39a8f]
+  // Nordic city-facade palette — soft pastel plaster, the real Helsinki/Turku
+  // Jugend + empire look: pale yellow, cream, sand, dusty rose, sage, pale
+  // ochre, warm grey. Kept light and muted, never garish.
+  const URBAN = [0xe6d9a8, 0xe8e0cf, 0xdcc9a2, 0xd9b9a6, 0xc9cdb6, 0xe0cf9f, 0xd2ccbe, 0xe3d3b0]
     .map((c) => new THREE.Color(c));
-  const C_UPLINTH = new THREE.Color(0x63615b), C_UROOF = new THREE.Color(0x34373b);
+  const C_UPLINTH = new THREE.Color(0x8a8578);            // pale granite basement
+  const C_UROOF = new THREE.Color(0x5b5f63);              // light zinc/sheet roof (not black)
   const _c = new THREE.Color();
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
@@ -385,30 +433,44 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const baseY = Math.max(ground, 0.45) - 0.06;   // plinth clear of the chop
 
     // ── URBAN BLOCKS: real city footprints (Helsinki, Turku, Porvoo, Hanko,
-    //    Mariehamn cores) are large — apartment and office blocks, not red
-    //    cottages. Footprint area decides: a big plan becomes a multi-storey
-    //    rendered block with a flat roof and lit window rows in a muted city
-    //    palette; small plans fall through to the timber-cottage code. ──
+    //    Mariehamn cores) are wide apartment/office blocks — pale pastel plaster
+    //    with a proper grid of paned windows (a shared facade texture, tinted
+    //    per building), a light sheet roof, and — for a long block — a few
+    //    differently-coloured segments, the way a real Helsinki street reads.
+    //    Small plans fall through to the timber-cottage code. ──
     const foot = bw * bd;
     if (cls === 0 && foot > 240) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
-      const floors = Math.max(2, Math.min(6, Math.round(Math.sqrt(foot) / 7)));
-      const fh = 3.15, bh = floors * fh;               // storey height, body height
-      const uc = URBAN[Math.floor(rngU() * URBAN.length)];
+      const floors = Math.max(2, Math.min(7, Math.round(Math.sqrt(foot) / 6.4)));
+      const fh = 3.2, bh = floors * fh;                  // storey height, body height
+      const along = bw >= bd ? bw : bd;                  // long axis
       const uplace = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
-      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw + 0.2, 0.5, bd + 0.2).translate(0, 0.25, 0), C_UPLINTH)));
-      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw, bh, bd).translate(0, bh / 2 + 0.4, 0), uc)));
-      bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(bw + 0.12, 0.32, bd + 0.12).translate(0, bh + 0.4, 0), C_UROOF)));
-      // lit window rows — one emissive band per storey on each face (the right
-      // LOD for a city seen from the water); nearest blocks only, for geometry
-      if (placed < 90) {
-        for (let fl = 0; fl < floors; fl++) {
-          const wy = 0.4 + fl * fh + fh * 0.58;
-          for (const sz of [1, -1])
-            winGeos.push(uplace(new THREE.BoxGeometry(bw * 0.9, 1.5, 0.06).translate(0, wy, sz * (bd / 2 + 0.02))));
-          for (const sx of [1, -1])
-            winGeos.push(uplace(new THREE.BoxGeometry(0.06, 1.5, bd * 0.9).translate(sx * (bw / 2 + 0.02), wy, 0)));
-        }
+      const TILE = urbanFacade().N * 2.4;                // world size of one texture tile
+      // split a long block into 2–4 street segments, each its own pastel + a
+      // small height step, so it doesn't read as one monolithic slab
+      const nSeg = along > 34 ? Math.min(4, Math.floor(along / 22) + 1) : 1;
+      const alongBW = bw >= bd;
+      for (let sgi = 0; sgi < nSeg; sgi++) {
+        const segLen = (alongBW ? bw : bd) / nSeg;
+        const off = (sgi - (nSeg - 1) / 2) * segLen;
+        const sw = alongBW ? segLen : bw, sd = alongBW ? bd : segLen;
+        const ox = alongBW ? off : 0, oz = alongBW ? 0 : off;
+        const uc = URBAN[Math.floor(rngU() * URBAN.length)];
+        const sbh = bh * (0.86 + rngU() * 0.28);         // slight per-segment height step
+        // plinth + roof cap in the vertex-coloured mesh
+        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.2, 1.0, sd + 0.2).translate(ox, 0.5, oz), C_UPLINTH)));
+        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.16, 0.5, sd + 0.16).translate(ox, sbh + 0.9, oz), C_UROOF)));
+        // four textured, tinted facade walls
+        const mk = (w2, px, pz, ry) => {
+          let g2 = urbanWall(w2, sbh, TILE);
+          g2.rotateY(ry); g2.translate(ox + px, sbh / 2 + 0.9, oz + pz);
+          g2 = paintGeo(g2, uc);                 // colour it (returns non-indexed)
+          urbanGeos.push(uplace(g2));
+        };
+        mk(sw, 0, sd / 2 + 0.02, 0);
+        mk(sw, 0, -sd / 2 - 0.02, Math.PI);
+        mk(sd, sw / 2 + 0.02, 0, Math.PI / 2);
+        mk(sd, -sw / 2 - 0.02, 0, -Math.PI / 2);
       }
       placed++;
       continue;
@@ -522,6 +584,16 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const wins = new THREE.Mesh(mergeGeometries(winGeos.map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
       new THREE.MeshStandardMaterial({ color: 0x201a14, roughness: 0.4, emissive: 0xffc06a, emissiveIntensity: 0.5 }));
     group.add(wins);
+  }
+  // urban city facades: one merged, single-texture mesh — pastel plaster tinted
+  // per building, paned windows from the shared grid texture, some lit for dusk
+  if (urbanGeos.length) {
+    const fac = urbanFacade();
+    const urban = new THREE.Mesh(mergeGeometries(urbanGeos.map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
+      new THREE.MeshStandardMaterial({ map: fac.map, emissiveMap: fac.emiMap, emissive: 0xffd9a0,
+        emissiveIntensity: 0.85, vertexColors: true, roughness: 0.82, side: THREE.DoubleSide }));
+    urban.castShadow = true; urban.receiveShadow = true;
+    group.add(urban);
   }
 
   // ── the REAL piers (OSM man_made=pier): short runs → wooden finger docks on

@@ -21,6 +21,7 @@ import { createAudio } from './audio.js';
 import { createChart } from './map.js';
 import { createGustField } from './wind.js';
 import { createShips, ROUTES } from './ships.js';
+import { createLandmarks } from './landmarks.js';
 
 /* ── renderer / scene / camera ── */
 const container = document.getElementById('app');
@@ -68,6 +69,9 @@ const boat = createBoat(scene);
 // ship traffic on its real routes: Viking + Silja on the Turku–Åland fairway,
 // the yellow road ferry, and the Utö-line connection vessel
 const ships = createShips(scene);
+
+// recognisable city landmarks (Helsinki + Turku cathedrals) at real coordinates
+createLandmarks(scene);
 
 /* ── the chart (M): pan/zoom the whole real Archipelago Sea, click to sail there ── */
 const chart = createChart(mapData, {
