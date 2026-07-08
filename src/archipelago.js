@@ -842,7 +842,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
-  let treeBudget = 17000;
+  let treeBudget = 23000;
   let grassBudget = 4200, slabBudget = 1300, reedBudget = 2200;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
@@ -991,8 +991,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     if (isl.cover ? satForest : (kind === 'forest' || hasWood)) {
       // base bonus scales with area: a flat constant times 50 skerries used
       // to drain the whole region budget before the main island's turn
-      const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.016), 340) : 0;
-      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.013 : 0.009)) + base, 3400, treeBudget);
+      const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.02), 440) : 0;
+      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.019 : 0.013)) + base, 4600, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -1028,8 +1028,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         // on sheltered islands, still real 9–20 m trees on the small ones (you
         // canNOT see over a wooded skerry from a boat), only the outermost
         // exposed rocks stay wind-stunted. A pine must tower over a house.
-        const maturity = isl.A > 600000 ? 2.9 : isl.A > 120000 ? 2.6 : isl.A > 20000 ? 2.2 : 1.7;
-        const sc = ((isBirch ? 0.95 : 1.0) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity;
+        const maturity = isl.A > 600000 ? 3.2 : isl.A > 120000 ? 2.9 : isl.A > 20000 ? 2.5 : 2.0;
+        const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity;
         _p.set(cx + lx, y - 0.2, cz + lz);
         // pines are slender spires: taller than wide, so 25 m doesn't read as a blob
         _s.set(sc * (0.6 + treeRng() * 0.22), sc, sc * (0.6 + treeRng() * 0.22));
@@ -1375,7 +1375,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = []; birchMats = []; juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
-    treeBudget = 17000;                   // region-wide cap: near islands (sorted first) win
+    treeBudget = 23000;                   // region-wide cap: near islands (sorted first) win
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region

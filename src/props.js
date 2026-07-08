@@ -82,12 +82,13 @@ Object.values(M).forEach((m) => { m.__shared = true; });
 
 function sparBuoy(green) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, 2.6, 7), green ? M.sparGreen : M.sparRed);
-  body.position.y = 0.9; g.add(body);
+  // stand tall enough to read from a boat: a real lateral spar shows ~3 m
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.6, 8), green ? M.sparGreen : M.sparRed);
+  body.position.y = 1.4; g.add(body);
   const top = green
-    ? new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 7), M.sparGreen)
-    : new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.36, 7), M.sparRed);
-  top.position.y = 2.35; g.add(top);
+    ? new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.7, 8), M.sparGreen)      // green cone-up
+    : new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.6, 8), M.sparRed); // red can
+  top.position.y = 3.5; g.add(top);
   g.rotation.z = 0.05; g.rotation.x = 0.04;
   return g;
 }
@@ -359,7 +360,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   };
   let marks = 0;
   for (const [mx, mz, tt] of (region.seamarks || [])) {
-    if (marks >= 90) break;
+    if (marks >= 200) break;
     if (heightAt(mx, mz) > -0.8) continue;               // keep marks off the rocks
     let m;
     if (tt === 0 || tt === 1) m = sparBuoy(tt === 1);
@@ -424,6 +425,24 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   const C_UPLINTH = new THREE.Color(0x8a8578);            // pale granite basement
   const C_UROOF = new THREE.Color(0x5b5f63);              // light zinc/sheet roof (not black)
   const _c = new THREE.Color();
+  // "big-building cluster" field: a big footprint only becomes a CITY apartment
+  // block where several OTHER big buildings cluster nearby (a real Helsinki /
+  // Turku / Porvoo / Mariehamn core). A lone big building in the countryside is
+  // a barn/warehouse — counting BIG buildings (not all, since city blocks are
+  // large + spaced and would otherwise undercount) is what separates the two.
+  const DCELL = 95, dHash = new Map();
+  for (const b of (region.buildings || [])) {
+    if (b[2] * b[3] <= 240) continue;                    // only big footprints define a core
+    const k = Math.floor(b[0] / DCELL) + ',' + Math.floor(b[1] / DCELL);
+    dHash.set(k, (dHash.get(k) || 0) + 1);
+  }
+  const bigCluster = (x, z) => {
+    const cx = Math.floor(x / DCELL), cz = Math.floor(z / DCELL);
+    let n = 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+      n += dHash.get((cx + dx) + ',' + (cz + dz)) || 0;
+    return n;                                             // big buildings within ~285 m box
+  };
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
     if (placed >= 450) break;
@@ -439,7 +458,9 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     //    differently-coloured segments, the way a real Helsinki street reads.
     //    Small plans fall through to the timber-cottage code. ──
     const foot = bw * bd;
-    if (cls === 0 && foot > 240) {
+    // urban block ONLY where big buildings cluster (≥ 5 in the ~285 m box) —
+    // a real city core. A lone/few big buildings stay timber (barn/warehouse).
+    if (cls === 0 && foot > 240 && bigCluster(bx, bz) >= 5) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
       const floors = Math.max(2, Math.min(7, Math.round(Math.sqrt(foot) / 6.4)));
       const fh = 3.2, bh = floors * fh;                  // storey height, body height
@@ -472,6 +493,31 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
         mk(sd, sw / 2 + 0.02, 0, Math.PI / 2);
         mk(sd, -sw / 2 - 0.02, 0, -Math.PI / 2);
       }
+      placed++;
+      continue;
+    }
+
+    // a big building OUTSIDE a city core = a barn / warehouse / large farmhouse:
+    // low-ish timber walls, a long moderate gabled roof, red or tar-brown or
+    // grey — never a pastel apartment block alone in a field.
+    if (cls === 0 && foot > 240) {
+      const alongB = bw >= bd ? bw : bd, acrossB = bw >= bd ? bd : bw;
+      const wh = Math.min(3.6 + Math.sqrt(foot) * 0.1, 6.5);
+      const rb = rng2();
+      const wallC = rb < 0.48 ? C_DKRED : rb < 0.6 ? C_TAR : rb < 0.74 ? C_GREY : C_RED;
+      const roofC = rng2() < 0.5 ? C_ROOF : C_ROOF2;
+      const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
+      const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
+      const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
+      bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, 0.3, bd + 0.14).translate(0, 0.15, 0), C_PLINTH)));
+      bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, wh, bd).translate(0, wh / 2 + 0.24, 0), wallC)));
+      const ov = Math.min(0.4, acrossB * 0.1), rw = acrossB + ov * 2, rl = alongB + ov * 2;
+      const roofH = Math.min(acrossB * 0.3, 3.2);
+      const shp = new THREE.Shape();
+      shp.moveTo(-rw / 2, 0); shp.lineTo(rw / 2, 0); shp.lineTo(0, roofH); shp.closePath();
+      const rg = new THREE.ExtrudeGeometry(shp, { depth: rl, bevelEnabled: false });
+      rg.translate(0, wh + 0.22, -rl / 2); rg.rotateY(Math.PI / 2);
+      bodyGeos.push(place(paintGeo(rg, roofC)));
       placed++;
       continue;
     }
@@ -687,7 +733,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // ── small boats moored alongside the real piers — the guest harbours ──
   let moored = 0;
   for (const line of (region.piers || [])) {
-    if (moored >= 90) break;
+    if (moored >= 140) break;
     if (!line.some(([px2, pz2]) => heightAt(px2, pz2) > -1.6)) continue;   // same land test
     let best = null, bd = 0;                       // seaward pier end = deepest water
     for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
@@ -697,7 +743,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
     const rx = dz, rz = -dx;                               // abeam the pier
     const nBoats = 4 + Math.floor(rng() * 4);             // 4–7 berthed — it's July out here
-    for (let k = 0; k < nBoats && moored < 90; k++) {
+    for (let k = 0; k < nBoats && moored < 140; k++) {
       const along = 3 + k * 5.5, side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
