@@ -22,7 +22,7 @@ export const PRESETS = {
     // the warm mie glow-cone without whole-sky milk; g .87 keeps the halo tight.
     sunElev: 2.0, sunAz: 162, turbidity: 4.2, rayleigh: 4.4, mie: 0.0045, g: 0.87, exposure: 0.42,
     sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x6c7fd8, hemiGround: 0x2e2a3e, hemiInt: 0.3,
-    ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xe08055, fogDensity: 0.0009,
+    ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xe08055, fogDensity: 0.0007,
     waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
     cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.78, cloudElevHi: false,
     cloudSize: [1800, 3600],
