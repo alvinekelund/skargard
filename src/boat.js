@@ -72,9 +72,16 @@ export function createBoat(scene) {
     const o = swan.getObjectByName(name);
     if (o) { o.parent.remove(o); o.position.x -= MAST_X; sailPivot.add(o); }
   }
-  // the genoa sets on the LEEWARD side and blows across in every tack/gybe —
-  // its belly is built bulging +z, so mirroring scale.z flips the set
+  // the genoa sets on the LEEWARD side and swings clew-across in every tack /
+  // gybe. It rotates around the FORESTAY (tack at the stem → head at the
+  // masthead): the luff stays pinned to the stay, only the clew/foot sweep to
+  // the new leeward side — exactly how a real headsail behaves. Belly mirrored
+  // so the curve sits on the leeward face; it trembles flat while luffing.
   const genoa = swan.getObjectByName('genoa');
+  const foreTack = new THREE.Vector3(5.30, 1.18, 0);
+  const foreAxis = new THREE.Vector3(1.70, 14.40, 0).sub(foreTack).normalize();
+  const _gq = new THREE.Quaternion(), _gp = new THREE.Vector3();
+  let genoaAngle = -0.32;
 
   group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   // interior + rope shadow flags were set deliberately — re-assert after the blanket pass
@@ -280,13 +287,23 @@ export function createBoat(scene) {
     }
     sailPivot.rotation.y += state.flap * 0.03 * Math.sin(t * 26);  // whole-rig tremble
 
-    // the genoa tacks too: mirror its belly to leeward — a controlled sweep
-    // through a tack, a fast blow-across in a gybe, trembling flat when luffing
+    // the genoa swings clew-across on every tack/gybe: rotate it around the
+    // forestay toward the new leeward side (fast in a gybe), flap it flat while
+    // luffing, and mirror its belly so the curve sits on the leeward face
     if (genoa) {
+      // sheeted harder upwind (clew near centreline), eased on a reach
+      const trim = 0.2 + 0.22 * (1 - Math.min(state.flap * 3, 1));
+      const targetAngle = -side * trim;
+      const k = state.boomSwing && state.boomSwing.type === 'gybe' ? 13 : 4.2;
+      genoaAngle += (targetAngle - genoaAngle) * (1 - Math.exp(-k * dt));
+      // luffing / mid-tack tremble on the whole headsail
+      const tremble = (state.flap * 0.05 + (state.boomSwing ? 0.06 : 0)) * Math.sin(t * 30);
+      _gq.setFromAxisAngle(foreAxis, genoaAngle + tremble);
+      genoa.quaternion.copy(_gq);
+      genoa.position.copy(foreTack).sub(_gp.copy(foreTack).applyQuaternion(_gq));
       const jibTarget = -side;
-      const k = state.boomSwing && state.boomSwing.type === 'gybe' ? 14 : 4.5;
-      let jz = genoa.scale.z + (jibTarget - genoa.scale.z) * (1 - Math.exp(-k * dt));
-      if (Math.abs(jz) < 0.06) jz = Math.sign(jibTarget) * 0.06;   // never fully degenerate
+      let jz = genoa.scale.z + (jibTarget - genoa.scale.z) * (1 - Math.exp(-4.2 * dt));
+      if (Math.abs(jz) < 0.1) jz = Math.sign(jibTarget) * 0.1;
       genoa.scale.z = jz;
     }
 
