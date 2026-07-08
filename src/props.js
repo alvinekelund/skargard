@@ -441,7 +441,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // game-frame centre + radius; everywhere else, a big building is timber.
   const CITY = [
     [194000, -40000, 4200],   // Helsinki (+ Espoo/Lauttasaari edge)
-    [41200, -70200, 3000],    // Turku
+    [42600, -71100, 3400],    // Turku (harbour → cathedral → Kauppatori downtown)
     [233500, -65100, 2200],   // Porvoo
     [82800, -2800, 1500],     // Hanko
     [-86300, -32800, 1600],   // Mariehamn

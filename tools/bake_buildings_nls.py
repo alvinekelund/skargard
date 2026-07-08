@@ -447,6 +447,23 @@ class CoastHash:
         return False
 
 
+# Central cores of the named mainland cities the player is steered to. Turku's
+# cathedral sits ~3.5 km up the Aura from the sea, so the coastal filter stripped
+# its ENTIRE downtown — the landmark ended up alone in a bare field. Keep the real
+# NLS footprints inside these circles (still density-thinned) so the cathedral
+# stands in a city. Game-frame x, z, radius (m).
+CITY_CORES = [
+    (42800.0, -71200.0, 3000.0),   # Turku: Aurajoki mouth → cathedral → Kauppatori
+]
+
+
+def in_city_core(x, z):
+    for cx, cz, r in CITY_CORES:
+        if (x - cx) ** 2 + (z - cz) ** 2 < r * r:
+            return True
+    return False
+
+
 def tm35_prefilter(samples, coast_r):
     """keep(bbox) predicate on TM35 ring bboxes: coarse, conservative.
 
@@ -459,6 +476,15 @@ def tm35_prefilter(samples, coast_r):
     zs = np.array([s[1] for s in samples])
     E, N = tm35fin(LON0 + xs / M_LON, LAT0 - zs / M_LAT)
     occ = set(zip((E // cell).astype(int).tolist(), (N // cell).astype(int).tolist()))
+    # mark city-core cells occupied too, so downtown rings survive the coarse
+    # prefilter and the exact coastal_filter (via in_city_core) decides precisely
+    for cx, cz, cr in CITY_CORES:
+        cE, cN = tm35fin(np.array([LON0 + cx / M_LON]), np.array([LAT0 - cz / M_LAT]))
+        ci, cj = int(cE[0] // cell), int(cN[0] // cell)
+        rc = int(cr // cell) + 1
+        for gi in range(ci - rc, ci + rc + 1):
+            for gj in range(cj - rc, cj + rc + 1):
+                occ.add((gi, gj))
 
     lat_min, lat_max, lon_min, lon_max = OLD_BBOX
     t = np.linspace(0.0, 1.0, 60)
@@ -501,7 +527,7 @@ def coastal_filter(recs, cents, coast, r):
         if in_old_bbox(clon, clat):
             kept.append((b, True))
             n_exempt += 1
-        elif coast.near(b[0], b[1], r):
+        elif coast.near(b[0], b[1], r) or in_city_core(b[0], b[1]):
             kept.append((b, False))
         else:
             n_drop += 1
