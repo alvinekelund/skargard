@@ -33,7 +33,7 @@ const COL = {
   juniper:new THREE.Color(0x36482e), // low dark-green shore bush
   birchLeaf: new THREE.Color(0x74853e),
   birchBark: new THREE.Color(0xbeb9ac),
-  trunk:  new THREE.Color(0x2a2018),
+  trunk:  new THREE.Color(0x51402f), // grey-brown bark, not black (reads at distance)
   rim:    new THREE.Color(0xffc98a),
 };
 
@@ -92,13 +92,13 @@ function needleTexture(seed) {
   const ctx = cv.getContext('2d');
   const rng = mulberry32(seed);
   ctx.clearRect(0, 0, S, S);
-  for (let i = 0; i < 2600; i++) {
+  for (let i = 0; i < 5200; i++) {                       // dense spray → fuller canopy, less holey scribble
     const x = rng() * S, y = rng() * S;
-    const len = 7 + rng() * 15;
+    const len = 8 + rng() * 16;
     const ang = Math.PI * 0.5 + (rng() - 0.5) * 1.5;     // mostly droop downward
     const g = 120 + rng() * 90;
-    ctx.strokeStyle = `rgba(${g * 0.75 | 0},${g | 0},${g * 0.7 | 0},${0.55 + rng() * 0.45})`;
-    ctx.lineWidth = 1 + rng() * 1.6;
+    ctx.strokeStyle = `rgba(${g * 0.75 | 0},${g | 0},${g * 0.7 | 0},${0.6 + rng() * 0.4})`;
+    ctx.lineWidth = 1.2 + rng() * 1.8;
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
@@ -846,7 +846,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
-  let treeBudget = 23000;
+  let treeBudget = 26000;
   let grassBudget = 4200, slabBudget = 1300, reedBudget = 2200;
 
   const perf = { mesh: 0, color: 0, scatter: 0 };
@@ -996,7 +996,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       // base bonus scales with area: a flat constant times 50 skerries used
       // to drain the whole region budget before the main island's turn
       const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.02), 440) : 0;
-      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.019 : 0.013)) + base, 4600, treeBudget);
+      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.022 : 0.015)) + base, 5200, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -1027,20 +1027,40 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           islandHeight(lx+e,lz,isl) - islandHeight(lx-e,lz,isl),
           islandHeight(lx,lz+e,isl) - islandHeight(lx,lz-e,isl)) / (2*e);
         if (dy > 1.0 && treeRng() > 0.3) continue;
-        const isBirch = treeRng() < 0.15;     // pine dominant, birch the accent
         // REAL Nordic forest scale (base pine geom ~4 m): mature 15–27 m pine
         // on sheltered islands, still real 9–20 m trees on the small ones (you
         // canNOT see over a wooded skerry from a boat), only the outermost
         // exposed rocks stay wind-stunted. A pine must tower over a house.
         const maturity = isl.A > 600000 ? 3.2 : isl.A > 120000 ? 2.9 : isl.A > 20000 ? 2.5 : 2.0;
-        const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity;
-        _p.set(cx + lx, y - 0.2, cz + lz);
-        // pines are slender spires: taller than wide, so 25 m doesn't read as a blob
-        _s.set(sc * (0.6 + treeRng() * 0.22), sc, sc * (0.6 + treeRng() * 0.22));
-        _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
-        _m.compose(_p, _q, _s);
-        (isBirch ? birchMats : pineMats).push(_m.clone());
-        placed++;
+        // A passing sample seeds a tight STAND, not a lone spire. Uniform scatter
+        // reads as an evenly-combed row with daylight through every gap — the
+        // dead giveaway. Real forest is clumped groves with rock clearings
+        // between: canopies touch and close into a solid dark wall. Clump size
+        // grows with island; the seed tree is the dominant (tallest), companions
+        // a little shorter — a natural age structure.
+        const clump = isl.A > 120000 ? 3 + Math.floor(treeRng() * 4)
+                    : isl.A > 20000  ? 2 + Math.floor(treeRng() * 3)
+                                     : 1 + Math.floor(treeRng() * 2);
+        for (let ci = 0; ci < clump && placed < target; ci++) {
+          let wx = cx + lx, wz = cz + lz, ty = y;
+          if (ci > 0) {                          // companions tight around the seed
+            const rad = 2.3 + treeRng() * 5.4, ang = treeRng() * 6.2832;
+            wx += Math.cos(ang) * rad; wz += Math.sin(ang) * rad;
+            ty = islandHeight(wx - cx, wz - cz, isl);
+            if (ty < 0.12 || ty > H + 4.5) continue;
+          }
+          const isBirch = treeRng() < 0.13;      // pine dominant, birch the accent
+          const vig = ci === 0 ? 1.0 : 0.68 + treeRng() * 0.32;
+          const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity * vig;
+          _p.set(wx, ty - 0.2, wz);
+          // pines are slender spires: taller than wide, so 25 m doesn't read as a blob
+          const wob = 0.6 + treeRng() * 0.22;
+          _s.set(sc * wob, sc, sc * wob);
+          _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+          _m.compose(_p, _q, _s);
+          (isBirch ? birchMats : pineMats).push(_m.clone());
+          placed++;
+        }
       }
     }
 
