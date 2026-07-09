@@ -1763,6 +1763,22 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     return m;
   }
 
+  // is the land at (x,z) wooded? 1 = the photo/OSM says forest, 0 = bare rock /
+  // heath / open. Used by the soundscape so only a pine-clad shore whispers.
+  function woodedAt(x, z) {
+    const pool = activeSet.length ? activeSet : islands;
+    for (const i of pool) {
+      const lx = x - i.x, lz = z - i.z;
+      const b = i.bbox;
+      if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
+      if (islandHeight(lx, lz, i) < 0.15) continue;        // not on this island's land
+      if (i.cover) return forestAt(i, lx, lz) ? 1 : 0;     // the photo is authoritative
+      if (i._wood && i._wood.length) return inCover(i._wood, x, z) ? 1 : 0;
+      return i.kind === 'forest' ? 1 : 0;                  // no grid: the island's character
+    }
+    return 0;
+  }
+
   const _inv = new THREE.Matrix4();
   function update(dt, t, camera, sunDir) {
     stepRebuild();                        // a slice of any in-flight region build
@@ -1800,7 +1816,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
 
   return {
-    group, update, islands, heightAt, islandHeight, rebuild, rebuildSync, setDebug, toggleSatellite,
+    group, update, islands, heightAt, woodedAt, islandHeight, rebuild, rebuildSync, setDebug, toggleSatellite,
     get debugOn() { return debugOn; },
     get debugInfo() { return lastCounts; },
     get satOn() { return satOn; },

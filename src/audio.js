@@ -157,7 +157,22 @@ export function buildBeds(ctx, dest) {
   shoreLfo.connect(shoreLfoG); shoreLfoG.connect(shoreG.gain);
   shore.start(); shoreLfo.start();
 
-  return { whiteBuf, washGain: washG, windGain: windG, whistleGain: whG, shoreGain: shoreG };
+  // trees in the wind: the soft surging "shhhh" of a breeze through pines that
+  // you hear when you close a wooded shore — the land's own voice, riding above
+  // the low water-on-rock wash. Rises with shore proximity AND the breeze,
+  // gusting on its own slow LFO. Driven by setEnv(wooded) × setWind().
+  const leaves = ctx.createBufferSource();
+  leaves.buffer = whiteBuf; leaves.loop = true;
+  const leavesBp = ctx.createBiquadFilter();
+  leavesBp.type = 'bandpass'; leavesBp.frequency.value = 1900; leavesBp.Q.value = 0.5;
+  const leavesG = ctx.createGain(); leavesG.gain.value = 0.0;
+  leaves.connect(leavesBp); leavesBp.connect(leavesG); leavesG.connect(dest);
+  const leavesLfo = ctx.createOscillator(); leavesLfo.frequency.value = 0.17;
+  const leavesLfoG = ctx.createGain(); leavesLfoG.gain.value = 0.35;   // gusts surge through the canopy
+  leavesLfo.connect(leavesLfoG); leavesLfoG.connect(leavesG.gain);
+  leaves.start(); leavesLfo.start();
+
+  return { whiteBuf, washGain: washG, windGain: windG, whistleGain: whG, shoreGain: shoreG, leavesGain: leavesG };
 }
 
 // a halyard tapping an aluminium mast — the sound of a full guest harbour. A
@@ -184,10 +199,10 @@ export function halyardClink(ctx, dest, t, o = {}) {
 export function createAudio() {
   let ctx = null, started = false, muted = true;
   let master = null, washGain = null, whiteBuf = null;
-  let windGain = null, whistleGain = null, shoreGain = null;
+  let windGain = null, whistleGain = null, shoreGain = null, leavesGain = null;
   let engine = null;                       // { gain, osc, sub } diesel throb
   let speedNorm = 0;                       // 0..1, from setSpeed
-  let windNorm = 0, shoreNorm = 0, harborNorm = 0, motorOn = false, throttle = 0;
+  let windNorm = 0, shoreNorm = 0, harborNorm = 0, woodedNorm = 0, motorOn = false, throttle = 0;
   let lapTimer = null, gullTimer = null, clinkTimer = null;
 
   // a small diesel auxiliary: a low throbbing tone (firing frequency) with a
@@ -285,6 +300,7 @@ export function createAudio() {
     washGain = beds.washGain;
     whiteBuf = beds.whiteBuf;
     windGain = beds.windGain; whistleGain = beds.whistleGain; shoreGain = beds.shoreGain;
+    leavesGain = beds.leavesGain;
     engine = buildEngine();
 
     scheduleLap();
@@ -307,6 +323,15 @@ export function createAudio() {
       windGain.gain.setTargetAtTime(0.02 + windNorm * 0.09, ctx.currentTime, 1.2);
       whistleGain.gain.setTargetAtTime(windNorm * windNorm * 0.02, ctx.currentTime, 1.2);
     }
+    updateLeaves();
+  }
+
+  // trees in the wind: only audible when close to a WOODED shore, and louder in
+  // a breeze — so a bare rock skerry stays quiet and a pine-clad island whispers
+  function updateLeaves() {
+    if (!ctx || !leavesGain) return;
+    const lvl = shoreNorm * woodedNorm * (0.25 + 0.75 * windNorm) * 0.06;
+    leavesGain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.8);
   }
 
   // scene context: shore proximity (0..1), nearest guest harbour (0..1),
@@ -314,9 +339,11 @@ export function createAudio() {
   function setEnv(o = {}) {
     shoreNorm = Math.min(Math.max(o.shore ?? 0, 0), 1);
     harborNorm = Math.min(Math.max(o.harbor ?? 0, 0), 1);
+    woodedNorm = Math.min(Math.max(o.wooded ?? 0, 0), 1);
     motorOn = !!o.motorOn; throttle = Math.min(Math.max(o.throttle ?? 0, 0), 1);
     if (!ctx) return;
     if (shoreGain) shoreGain.gain.setTargetAtTime(shoreNorm * shoreNorm * 0.11, ctx.currentTime, 1.0);
+    updateLeaves();
     if (engine) {
       const lvl = motorOn ? 0.05 + throttle * 0.10 : 0;
       engine.gain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.4);
