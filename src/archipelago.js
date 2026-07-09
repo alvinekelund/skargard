@@ -41,7 +41,7 @@ const COL = {
 };
 
 /* foliage material: gentle wind sway + a subtle sun-gated rim */
-function makeFoliageMat(shaders, sunViewDir, { roughness = 0.85, sway = 0.09, swayLo = 1.0, swayHi = 4.5, rimStrength = 0.5 }) {
+function makeFoliageMat(shaders, sunViewDir, { roughness = 0.85, sway = 0.09, swayLo = 1.0, swayHi = 4.5, rimStrength = 0.5, warm = 0.22 }) {
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness: 0, envMapIntensity: 0.4 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
@@ -49,6 +49,7 @@ function makeFoliageMat(shaders, sunViewDir, { roughness = 0.85, sway = 0.09, sw
     sh.uniforms.uSwayLo = { value: swayLo };
     sh.uniforms.uSwayHi = { value: swayHi };
     sh.uniforms.uRim = { value: rimStrength };
+    sh.uniforms.uWarm = { value: warm };
     sh.uniforms.uRimColor = { value: COL.rim };
     sh.uniforms.uSunViewDir = { value: sunViewDir };
     sh.vertexShader = sh.vertexShader
@@ -67,12 +68,14 @@ function makeFoliageMat(shaders, sunViewDir, { roughness = 0.85, sway = 0.09, sw
         vRP=mvPosition.xyz;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform float uRim; uniform vec3 uRimColor,uSunViewDir; varying vec3 vRN; varying vec3 vRP;`)
+        uniform float uRim,uWarm; uniform vec3 uRimColor,uSunViewDir; varying vec3 vRN; varying vec3 vRP;`)
       .replace('#include <opaque_fragment>', `
-        { vec3 n=normalize(vRN); vec3 v=normalize(-vRP);
+        { vec3 n=normalize(vRN); vec3 v=normalize(-vRP); vec3 sd=normalize(uSunViewDir);
           float f=pow(1.0-clamp(dot(n,v),0.0,1.0),2.0);
-          float g=smoothstep(-0.15,0.55,dot(n,normalize(uSunViewDir)));
-          outgoingLight+=uRimColor*f*g*uRim; }
+          float g=smoothstep(-0.15,0.55,dot(n,sd));
+          float sun=max(dot(n,sd),0.0);                          // broad sun-facing wrap
+          // warm the whole lit side (golden hour glow), plus the fresnel edge rim
+          outgoingLight+=uRimColor*(f*g*uRim + sun*sun*uWarm*(0.35+0.65*diffuseColor.g)); }
         #include <opaque_fragment>`);
     shaders.push(sh);
   };
