@@ -709,13 +709,16 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     //    differently-coloured segments, the way a real Helsinki street reads.
     //    Small plans fall through to the timber-cottage code. ──
     const foot = bw * bd;
-    // urban block ONLY inside a real city core; elsewhere a big footprint is
-    // a timber barn/warehouse, never a pastel apartment block in a village.
-    if (cls === 0 && foot > 240 && inCity(bx, bz)) {
+    // urban block inside a real city core (down to small infill plans — a
+    // downtown has NO red timber cottages); elsewhere only a big footprint is
+    // urban, and a village big footprint is a timber barn, not a pastel block.
+    const cityHere = inCity(bx, bz);
+    if (cls === 0 && (cityHere ? foot > 90 : foot > 240)) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
       // vary storeys per building (not just by footprint) so the waterfront
-      // skyline undulates 4–8 floors instead of every block maxing at a flat 7
-      const floors = Math.max(3, Math.min(8, Math.round(Math.sqrt(foot) / 6.9 + (rngU() - 0.4) * 2.4)));
+      // skyline undulates 3–8 floors instead of every block maxing at a flat 7;
+      // small infill plans stay low (2–4), the grand blocks rise behind them
+      const floors = Math.max(cityHere && foot < 220 ? 2 : 3, Math.min(8, Math.round(Math.sqrt(foot) / 6.6 + (rngU() - 0.4) * 3.0)));
       const fh = 3.2, bh = floors * fh;                  // storey height, body height
       const along = bw >= bd ? bw : bd;                  // long axis
       const uplace = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
