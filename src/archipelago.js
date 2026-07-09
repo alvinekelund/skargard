@@ -590,7 +590,6 @@ function gridH(g, lx, lz) {
 const HARBOR_BASINS = [
   [193980, -40140, 360],   // Helsinki Eteläsatama (South Harbour) + Market Square front
   [194720, -39760, 280],   // Katajanokka / Viking berth channel
-  [43600, -71600, 300],    // Turku passenger harbour + the Aura mouth
 ];
 
 // height above the real shoreline. Three tiers of honesty:
@@ -1221,7 +1220,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     // they poke through the trees; on bald ones they ARE the landscape.
     // mainland tiles cover built-up coast + cities — far fewer strewn boulders
     // there (a downtown isn't a moraine field), just the odd park outcrop
-    const btarget = Math.min(Math.floor(isl.A * (isl.cut ? 0.0008 : kind === 'forest' ? 0.0045 : 0.009)), isl.cut ? 40 : 190);
+    // heath islands (Jurmo & the bald outer skerries) are strewn moraine — far
+    // more boulders and more big erratics than a wooded island, which is what
+    // gives that ground its granular, glaciated texture instead of a smooth heath
+    const heathy = !isl.cut && kind !== 'forest';
+    const btarget = Math.min(Math.floor(isl.A * (isl.cut ? 0.0008 : kind === 'forest' ? 0.0045 : 0.015)), isl.cut ? 40 : heathy ? 360 : 190);
     let bp = 0, bt = 0;
     while (bp < btarget && bt < btarget * 8) {
       bt++;
@@ -1234,8 +1237,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         if (cl === 1 && treeRng() < 0.65) continue;     // forest: only the odd erratic pokes through
       }
       if (nearRoad(cx + lx, cz + lz)) continue;
-      // most are knee-to-head boulders; ~14% are big erratics / rounded outcrops
-      const big = treeRng() < 0.14;
+      // most are knee-to-head boulders; big erratics / rounded outcrops are
+      // commoner on the moraine heaths (Jurmo's car-sized glacial stones)
+      const big = treeRng() < (heathy ? 0.22 : 0.14);
       const sc = big ? 2.6 + treeRng() * 2.4 : 0.5 + treeRng() * 1.5;
       _p.set(cx + lx, y - (big ? 0.35 : 0.1), cz + lz);
       _s.set(sc * (0.8 + treeRng() * 0.5), sc * (big ? 0.42 + treeRng() * 0.3 : 0.6 + treeRng() * 0.4), sc * (0.8 + treeRng() * 0.5));
