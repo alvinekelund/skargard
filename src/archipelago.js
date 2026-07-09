@@ -1369,10 +1369,30 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const g of [pineGeo.trunk, pineGeo.canopy, scotsGeo.trunk, scotsGeo.canopy, birchGeo.trunk, birchGeo.canopy, juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
 
-  function makeInstanced(geo, mat, mats, depthMat = null) {
+  // tint > 0 gives every instance a small, STABLE per-tree colour offset
+  // (brightness + a warm/cool hue nudge) seeded from its world position, so a
+  // stand of one shared canopy geometry no longer reads as identical clones —
+  // some trees yellow-green, some blue-green, the shimmer of a real wood.
+  const _tc = new THREE.Color();
+  function makeInstanced(geo, mat, mats, depthMat = null, tint = 0) {
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(mats.length, 1));
-    mats.forEach((m, i) => mesh.setMatrixAt(i, m)); mesh.count = mats.length;
-    mesh.instanceMatrix.needsUpdate = true; mesh.frustumCulled = false;
+    mats.forEach((m, i) => {
+      mesh.setMatrixAt(i, m);
+      if (tint > 0) {
+        const e = m.elements;
+        let s = ((Math.imul(e[12] | 0, 73856093) ^ Math.imul(e[14] | 0, 19349663)) >>> 0) || 1;
+        s = (Math.imul(s, 1664525) + 1013904223) >>> 0; const r1 = s / 4294967296;
+        s = (Math.imul(s, 1664525) + 1013904223) >>> 0; const r2 = s / 4294967296;
+        const l = 1 + (r1 * 0.30 - 0.15) * tint;      // ±15 % brightness
+        const w = (r2 - 0.5) * 0.16 * tint;           // warm(+)/cool(−) hue nudge
+        _tc.setRGB(l * (1 + w), l, l * (1 - w * 0.6));
+        mesh.setColorAt(i, _tc);
+      }
+    });
+    mesh.count = mats.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = false;
     mesh.castShadow = true; mesh.receiveShadow = true;
     if (depthMat) mesh.customDepthMaterial = depthMat;
     activeGroup.add(mesh);
@@ -1666,12 +1686,12 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       activeGroup.add(mesh);
     }
     makeInstanced(pineGeo.trunk, trunkMat, pineMats);
-    makeInstanced(pineGeo.canopy, pineMat, pineMats, depthNeedle);
+    makeInstanced(pineGeo.canopy, pineMat, pineMats, depthNeedle, 1.0);
     makeInstanced(scotsGeo.trunk, trunkMat, scotsMats);
-    makeInstanced(scotsGeo.canopy, scotsMat, scotsMats, depthNeedle);
+    makeInstanced(scotsGeo.canopy, scotsMat, scotsMats, depthNeedle, 1.0);
     makeInstanced(birchGeo.trunk, trunkMat, birchMats);
-    makeInstanced(birchGeo.canopy, birchMat, birchMats, depthLeaf);
-    makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf);
+    makeInstanced(birchGeo.canopy, birchMat, birchMats, depthLeaf, 1.0);
+    makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf, 0.7);
     makeInstanced(boulderGeo, boulderMat, boulderMats);
     makeInstanced(slabGeo, boulderMat, slabMats);
     const grassMesh = makeInstanced(grassGeo, grassMat, grassMats);
