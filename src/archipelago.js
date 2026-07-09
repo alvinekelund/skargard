@@ -1135,7 +1135,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             _q.setFromAxisAngle(new THREE.Vector3(Math.cos(windLean), 0, Math.sin(windLean)), lean);
             _q.multiply(new THREE.Quaternion().setFromAxisAngle(_up, treeRng() * Math.PI * 2));
           } else {
-            _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
+            // even sheltered trees lean a few degrees every which way — a forest
+            // of perfectly plumb clones is the tell of procedural planting
+            const tilt = 0.025 + treeRng() * 0.055, dir = treeRng() * Math.PI * 2;
+            _q.setFromAxisAngle(new THREE.Vector3(Math.cos(dir), 0, Math.sin(dir)), tilt);
+            _q.multiply(new THREE.Quaternion().setFromAxisAngle(_up, treeRng() * Math.PI * 2));
           }
           _m.compose(_p, _q, _s);
           (isBirch ? birchMats : isScots ? scotsMats : pineMats).push(_m.clone());
