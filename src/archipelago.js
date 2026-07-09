@@ -581,6 +581,18 @@ function gridH(g, lx, lz) {
         + (v[i00 + g.nx] * (1 - tx) + v[i00 + g.nx + 1] * tx) * tz) * 0.1;
 }
 
+// Dredged harbour basins: the simplified OSM mainland coastline fills real
+// deep harbours (Helsinki's South Harbour, Turku's passenger quay on the Aura)
+// with a broad shallow shelf that read as a grey mud flat right where ferries
+// dock in metres of water. Inside these discs any SHALLOW ground (< 2.2 m) is
+// carved back to deep water — buildings, streets and quay edges sit higher and
+// are untouched. [worldX, worldZ, radius]
+const HARBOR_BASINS = [
+  [193980, -40140, 360],   // Helsinki Eteläsatama (South Harbour) + Market Square front
+  [194720, -39760, 280],   // Katajanokka / Viking berth channel
+  [43600, -71600, 300],    // Turku passenger harbour + the Aura mouth
+];
+
 // height above the real shoreline. Three tiers of honesty:
 //  · grid islands — REAL interior relief (EU-DEM), pinned to 0 at the OSM ring
 //  · e-only islands — REAL peak height scaling a procedural whaleback profile
@@ -593,12 +605,23 @@ function islandHeight(lx, lz, isl) {
     // grid carries the interior. Adjacent tiles sample the same globally
     // aligned lattice, so seams match; heightAt's max() hides the skirts.
     const sm = polySdfFast(lx, lz, isl);
-    if (sm <= 0) return Math.max(sm * 0.55, -8.0) - 0.05;
-    const shoreN = THREE.MathUtils.smoothstep(sm, 0, 60);
-    let hm = isl.grid ? gridH(isl.grid, lx, lz) * shoreN
-      : THREE.MathUtils.smoothstep(sm, 0, 140) * 6;        // no DEM yet: low coast
-    hm += fbm((lx + isl.x) * 0.09 + (lz + isl.z) * 0.02, (lz + isl.z) * 0.09, 3) * 0.3 * shoreN;
-    return hm - 0.05;
+    let h;
+    if (sm <= 0) h = Math.max(sm * 0.55, -8.0) - 0.05;
+    else {
+      const shoreN = THREE.MathUtils.smoothstep(sm, 0, 60);
+      let hm = isl.grid ? gridH(isl.grid, lx, lz) * shoreN
+        : THREE.MathUtils.smoothstep(sm, 0, 140) * 6;      // no DEM yet: low coast
+      hm += fbm((lx + isl.x) * 0.09 + (lz + isl.z) * 0.02, (lz + isl.z) * 0.09, 3) * 0.3 * shoreN;
+      h = hm - 0.05;
+    }
+    if (h < 2.2 && h > -3.5) {                             // dredge filled-in harbour shelves
+      const wx = lx + isl.x, wz = lz + isl.z;
+      for (let k = 0; k < HARBOR_BASINS.length; k++) {
+        const dbx = wx - HARBOR_BASINS[k][0], dbz = wz - HARBOR_BASINS[k][1];
+        if (dbx * dbx + dbz * dbz < HARBOR_BASINS[k][2] * HARBOR_BASINS[k][2]) return -3.6;
+      }
+    }
+    return h;
   }
   const s = polySdfFast(lx, lz, isl);
   if (s <= 0) return Math.max(s * 0.55, -8.0) - 0.05;      // gentle submerged apron
