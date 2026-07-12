@@ -380,15 +380,20 @@ function boulderGeometry(rng) {
 }
 
 // red-and-white vertical stripe texture for the Utö tower (signal flag "H")
-// the REAL Utö paint: the tower wears signal flag H (Hotel) — split VERTICALLY
-// into a white half and a red half (the island is a pilot station; flag H =
-// "pilot on board"). Wrapped around the square tower: two faces white, two red.
+// the REAL Utö paint, corrected against the photograph: each face of the
+// square tower carries TWO broad vertical red stripes on white ground (the
+// tower renders signal flag H as striping, not as split halves). One face's
+// pattern painted once, repeated 4× around the tower.
 function stripeTexture() {
-  const w = 64, h = 64, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const w = 80, h = 64, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#eae5da'; ctx.fillRect(0, 0, w / 2, h);
-  ctx.fillStyle = '#9a2f24'; ctx.fillRect(w / 2, 0, w / 2, h);
-  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  ctx.fillStyle = '#ece7dc'; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#a32d1f';
+  ctx.fillRect(w * 0.18, 0, w * 0.24, h);       // two broad red verticals on white
+  ctx.fillRect(w * 0.58, 0, w * 0.24, h);
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = THREE.RepeatWrapping; t.repeat.x = 4;   // once per tower face
+  t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
 function radialGlowTexture() {
@@ -430,8 +435,8 @@ function buildLighthouse() {
   tower.rotation.y = Math.PI / 4; tower.position.y = towerH / 2; g.add(tower);
   const gallery = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.48, tw * 0.48, 0.6, 4), new THREE.MeshStandardMaterial({ color: 0x26292d, roughness: 0.6 }));
   gallery.rotation.y = Math.PI / 4; gallery.position.y = towerH + 0.1; g.add(gallery);
-  // glazed lantern room — dark mullions, warm glass
-  const lantern = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.26, tw * 0.28, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x22262a, roughness: 0.35, metalness: 0.35 }));
+  // glazed lantern room — the photo shows a dark red-brown housing, not black
+  const lantern = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.26, tw * 0.28, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x54291f, roughness: 0.45, metalness: 0.2 }));
   lantern.position.y = towerH + 1.5; g.add(lantern);
   const core = new THREE.Mesh(new THREE.SphereGeometry(tw * 0.19, 14, 12), new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0xffcf66, emissiveIntensity: 2 }));
   core.position.y = towerH + 1.5; g.add(core);
