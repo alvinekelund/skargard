@@ -357,13 +357,14 @@ function boulderGeometry(rng) {
 }
 
 // red-and-white vertical stripe texture for the Utö tower (signal flag "H")
+// the REAL Utö paint: the tower wears signal flag H (Hotel) — split VERTICALLY
+// into a white half and a red half (the island is a pilot station; flag H =
+// "pilot on board"). Wrapped around the square tower: two faces white, two red.
 function stripeTexture() {
   const w = 64, h = 64, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#e9e4da'; ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = '#9a2f24';
-  const n = 4, sw = w / (n * 2);
-  for (let i = 0; i < n; i++) ctx.fillRect((i * 2 + 0.5) * sw, 0, sw, h);
+  ctx.fillStyle = '#eae5da'; ctx.fillRect(0, 0, w / 2, h);
+  ctx.fillStyle = '#9a2f24'; ctx.fillRect(w / 2, 0, w / 2, h);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
@@ -395,22 +396,27 @@ function buildBeam() {
   return new THREE.Mesh(geo, mat);
 }
 
-// the Utö lighthouse: square striped granite tower, red lantern, green dome, flashing light
+// the Utö lighthouse, to the REAL tower: Finland's oldest (1814) — a 24 m
+// SQUARE granite tower on the island summit, painted as signal flag H
+// (vertical white/red halves), glazed lantern under a low dark cap. The
+// green-domed round-striped version was a generic lighthouse, not Utö.
 function buildLighthouse() {
   const g = new THREE.Group();
-  const towerH = 20, tw = 5.4;
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.4, tw * 0.5, towerH, 4), new THREE.MeshStandardMaterial({ map: stripeTexture(), roughness: 0.78 }));
+  const towerH = 22, tw = 5.8;
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.42, tw * 0.5, towerH, 4), new THREE.MeshStandardMaterial({ map: stripeTexture(), roughness: 0.82 }));
   tower.rotation.y = Math.PI / 4; tower.position.y = towerH / 2; g.add(tower);
-  const gallery = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.46, tw * 0.46, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.6 }));
-  gallery.position.y = towerH + 0.1; g.add(gallery);
-  const lantern = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.3, tw * 0.32, 2.6, 8), new THREE.MeshStandardMaterial({ color: 0x8f2c22, roughness: 0.5 }));
-  lantern.position.y = towerH + 1.6; g.add(lantern);
-  const core = new THREE.Mesh(new THREE.SphereGeometry(tw * 0.2, 14, 12), new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0xffcf66, emissiveIntensity: 2 }));
-  core.position.y = towerH + 1.6; g.add(core);
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(tw * 0.34, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), new THREE.MeshStandardMaterial({ color: 0x2f5a48, roughness: 0.5, metalness: 0.2 }));
-  dome.position.y = towerH + 2.9; g.add(dome);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.0, 6), new THREE.MeshStandardMaterial({ color: 0x222222 }));
-  tip.position.y = towerH + 3.7; g.add(tip);
+  const gallery = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.48, tw * 0.48, 0.6, 4), new THREE.MeshStandardMaterial({ color: 0x26292d, roughness: 0.6 }));
+  gallery.rotation.y = Math.PI / 4; gallery.position.y = towerH + 0.1; g.add(gallery);
+  // glazed lantern room — dark mullions, warm glass
+  const lantern = new THREE.Mesh(new THREE.CylinderGeometry(tw * 0.26, tw * 0.28, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x22262a, roughness: 0.35, metalness: 0.35 }));
+  lantern.position.y = towerH + 1.5; g.add(lantern);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(tw * 0.19, 14, 12), new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0xffcf66, emissiveIntensity: 2 }));
+  core.position.y = towerH + 1.5; g.add(core);
+  // low dark conical cap (no green dome on the real tower) + finial
+  const dome = new THREE.Mesh(new THREE.ConeGeometry(tw * 0.34, 1.4, 10), new THREE.MeshStandardMaterial({ color: 0x2b2e32, roughness: 0.55, metalness: 0.2 }));
+  dome.position.y = towerH + 3.3; g.add(dome);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+  tip.position.y = towerH + 4.3; g.add(tip);
   const pl = new THREE.PointLight(0xffe2a0, 0, 320, 1.6); pl.position.y = towerH + 1.6; g.add(pl);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialGlowTexture(), color: 0xffe6a8, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0, fog: false }));
   glow.position.y = towerH + 1.6; glow.scale.setScalar(16); g.add(glow);
@@ -783,6 +789,29 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const birchMat = makeFoliageMat(shaders, sunViewDir, { roughness: 0.7, sway: 0.13, swayLo: 1.0, swayHi: 4.5, rimStrength: 0.45 });
   birchMat.map = leafTex; birchMat.alphaTest = 0.4; birchMat.side = THREE.DoubleSide;
   const trunkMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, envMapIntensity: 0.3 });
+  // birch bark: chalk-white with the horizontal black lenticel scars and dark
+  // butt every real birch carries — a plain white pole read as PVC pipe
+  const birchBarkTexture = (() => {
+    const w = 64, h = 128, cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#e8e4da'; ctx.fillRect(0, 0, w, h);
+    let seed = 31;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 26; i++) {                        // horizontal dark dashes
+      const y = rnd() * h, x = rnd() * w, len = 6 + rnd() * 18;
+      ctx.fillStyle = `rgba(30,28,26,${0.5 + rnd() * 0.4})`;
+      ctx.fillRect(x, y, len, 1.4 + rnd() * 2.2);
+    }
+    for (let i = 0; i < 5; i++) {                         // grey patches / peeling
+      ctx.fillStyle = `rgba(120,116,108,${0.16 + rnd() * 0.2})`;
+      ctx.fillRect(rnd() * w, rnd() * h, 8 + rnd() * 16, 5 + rnd() * 12);
+    }
+    ctx.fillStyle = 'rgba(40,36,32,0.55)'; ctx.fillRect(0, h - 14, w, 14);  // dark butt at the base
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  const birchTrunkMat = new THREE.MeshStandardMaterial({ map: birchBarkTexture, vertexColors: true, roughness: 0.85, metalness: 0, envMapIntensity: 0.3 });
 
   // ── granite material: triplanar PBR (real rock detail) under the vertex-colour
   //    ecological tints, glossy wet shoreline, animated foam line ──
@@ -1472,7 +1501,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, pineMat, scotsMat, birchMat, trunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const m of [islandMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const arr of [pineGeos, scotsGeos, birchGeos]) for (const gg of arr) { gg.trunk.__shared = true; gg.canopy.__shared = true; }
   for (const g of [juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
@@ -1821,7 +1850,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       makeInstanced(pineGeos[v].canopy, pineMat, pineMats[v], depthNeedle, 1.0);
       makeInstanced(scotsGeos[v].trunk, trunkMat, scotsMats[v]);
       makeInstanced(scotsGeos[v].canopy, scotsMat, scotsMats[v], depthNeedle, 1.0);
-      makeInstanced(birchGeos[v].trunk, trunkMat, birchMats[v]);
+      makeInstanced(birchGeos[v].trunk, birchTrunkMat, birchMats[v]);
       makeInstanced(birchGeos[v].canopy, birchMat, birchMats[v], depthLeaf, 1.0);
     }
     makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf, 0.7);
