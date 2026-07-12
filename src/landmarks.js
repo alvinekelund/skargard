@@ -150,11 +150,49 @@ function uspenskiCathedral() {
   return g;
 }
 
+// A medieval archipelago church (Nagu, Korpo…) — the landmark of every big
+// parish island: a long greystone nave under a very steep black shingle roof,
+// whitewashed gable tops, a slender ridge turret, and the separate low timber
+// bell tower (klockstapel) beside it. From the sound it's the steep dark roof
+// over the trees that tells you which village you're closing.
+function parishChurch() {
+  const g = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({ color: 0xa8a394, roughness: 0.95 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe6e2d4, roughness: 0.8 });
+  const shingle = new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 0.9 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x4a3a2c, roughness: 0.9 });
+
+  // nave: fieldstone walls, then the steep roof rising higher than the walls
+  g.add(box(12, 7, 30, 0, 3.5, 0, stone));
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 8.6, 9, 3), shingle);
+  roof.scale.set(1, 1, 3.7); roof.rotation.x = Math.PI / 2; roof.rotation.z = Math.PI;
+  roof.position.set(0, 11.5, 0); g.add(roof);
+  // slender ridge turret with a little spire and cross
+  g.add(box(2.2, 3.4, 2.2, 0, 16.5, 9, timber));
+  const tspire = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.8, 4.4, 4), shingle);
+  tspire.rotation.y = Math.PI / 4; tspire.position.set(0, 20.4, 9); g.add(tspire);
+  g.add(box(0.18, 1.6, 0.18, 0, 23, 9, white)); g.add(box(0.9, 0.18, 0.18, 0, 23.3, 9, white));
+  // the separate klockstapel: splayed timber base, open belfry, pyramid cap
+  const bt = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 4.2, 8, 4), timber);
+  base.rotation.y = Math.PI / 4; base.position.y = 4; bt.add(base);
+  const belfry = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.6, 3.4), timber);
+  belfry.position.y = 9.2; bt.add(belfry);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 2.9, 3.6, 4), shingle);
+  cap.rotation.y = Math.PI / 4; cap.position.y = 12.3; bt.add(cap);
+  bt.position.set(13, 0, -11);
+  g.add(bt);
+  return g;
+}
+
 export function createLandmarks(scene) {
   const items = [
     { build: helsinkiCathedral, lat: 60.1697, lon: 24.9521, y: 7, yaw: 0 },
     { build: uspenskiCathedral, lat: 60.1683, lon: 24.9590, y: 6, yaw: 0.3 },
     { build: turkuCathedral, lat: 60.4525, lon: 22.2783, y: 8, yaw: 0.5 },
+    // the parish churches of the big archipelago islands, at their real spots
+    { build: parishChurch, lat: 60.1953, lon: 21.9106, y: 6, yaw: 0.25 },  // Nagu kyrka
+    { build: parishChurch, lat: 60.1637, lon: 21.5750, y: 8, yaw: 1.85 },  // Korpo kyrka
   ];
   const group = new THREE.Group();
   for (const it of items) {
