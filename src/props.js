@@ -561,21 +561,21 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
   // red boathouses at the root, gables to the water
   for (let k = 0; k < H.boathouses; k++) {
     const off = -walkLen / 2 + (k + 0.5) * (walkLen / H.boathouses);
-    const spot = onLand(ax + rx * off, az + rz * off, 0.4);
+    const spot = onLand(ax + rx * off, az + rz * off, 0.8);
     if (!spot) continue;
     const bh = boathouse(rng); bh.position.set(spot[0], spot[2], spot[1]); bh.rotation.y = ang; group.add(bh);
   }
   // harbour café / office with its terrace, set back on the shore
   if (H.cafe) {
-    const spot = onLand(ax + rx * (walkLen * 0.18), az + rz * (walkLen * 0.18), 0.6);
+    const spot = onLand(ax + rx * (walkLen * 0.18), az + rz * (walkLen * 0.18), 0.8);
     if (spot) { const hb = harborBuilding(rng); hb.position.set(spot[0], spot[2], spot[1]); hb.rotation.y = ang + Math.PI; group.add(hb); }
   }
   // a flagpole flying the Finnish flag by the head of the quay — every guest
   // harbour has one — and a little shore sauna (the most Finnish detail there is)
-  const fspot = onLand(ax + rx * (walkLen * 0.42), az + rz * (walkLen * 0.42), 0.5);
+  const fspot = onLand(ax + rx * (walkLen * 0.42), az + rz * (walkLen * 0.42), 0.8);
   if (fspot) { const fp = flagpole(rng); fp.position.set(fspot[0], fspot[2], fspot[1]); group.add(fp); }
   if (rng() < 0.8) {
-    const sspot = onLand(ax - rx * (walkLen * 0.5), az - rz * (walkLen * 0.5), 0.4);
+    const sspot = onLand(ax - rx * (walkLen * 0.5), az - rz * (walkLen * 0.5), 0.8);
     if (sspot) { const sa = sauna(rng); sa.position.set(sspot[0], sspot[2], sspot[1]); sa.rotation.y = ang + (rng() - 0.5) * 0.5; group.add(sa); }
   }
 }
@@ -698,9 +698,15 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
     if (placed >= 450) break;
     const ground = heightAt(bx, bz);
-    if (ground < -1.2) continue;                          // skip footprints over open water
+    // skip footprints whose ground is genuinely under water — a footprint on a
+    // submerged shelf (chart offset / simplified shoreline) rendered a house
+    // rising straight out of the sea, which no plinth can make honest
+    if (ground < -0.35) continue;
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
-    const baseY = Math.max(ground, 0.45) - 0.06;   // plinth clear of the chop
+    // a shore building stands on a stone footing well proud of the sea — with
+    // the floor at wave height, every low-shelf shoreline row read as flooded
+    const baseY = Math.max(ground, 0.85) - 0.06;
+    const found = Math.max(0, baseY - Math.max(ground, -0.6)) + 0.3;   // footing reaches the real ground
 
     // ── URBAN BLOCKS: real city footprints (Helsinki, Turku, Porvoo, Hanko,
     //    Mariehamn cores) are wide apartment/office blocks — pale pastel plaster
@@ -735,8 +741,9 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
         const uc = URBAN[Math.floor(rngU() * URBAN.length)];
         const sbh = bh * (0.86 + rngU() * 0.28);         // slight per-segment height step
         const capY = sbh + 0.9;
-        // plinth + overhanging cornice in the vertex-coloured mesh
-        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.2, 1.0, sd + 0.2).translate(ox, 0.5, oz), C_UPLINTH)));
+        // plinth + overhanging cornice in the vertex-coloured mesh — the granite
+        // basement runs down to the real ground so a raised block never floats
+        bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.2, 0.7 + found, sd + 0.2).translate(ox, 1.0 - (0.7 + found) / 2, oz), C_UPLINTH)));
         bodyGeos.push(uplace(paintGeo(new THREE.BoxGeometry(sw + 0.5, 0.4, sd + 0.5).translate(ox, capY, oz), C_TRIM)));  // cornice
         // roof: a pitched/mansard sheet-metal roof (ridge along the long side)
         // on most blocks, an occasional flat roof — so the skyline serrates
@@ -789,7 +796,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
       const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
       const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
-      bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, 0.3, bd + 0.14).translate(0, 0.15, 0), C_PLINTH)));
+      bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, found, bd + 0.14).translate(0, 0.3 - found / 2, 0), C_PLINTH)));
       bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, wh, bd).translate(0, wh / 2 + 0.24, 0), wallC)));
       const ov = Math.min(0.4, acrossB * 0.1), rw = acrossB + ov * 2, rl = alongB + ov * 2;
       const roofH = Math.min(acrossB * 0.3, 3.2);
@@ -821,8 +828,9 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
     const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
     const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
-    // plinth + walls (footprint axes, not ridge axes)
-    bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, 0.3, bd + 0.14).translate(0, 0.15, 0), C_PLINTH)));
+    // plinth + walls (footprint axes, not ridge axes) — the plinth runs from
+    // just above the sill DOWN to the real ground, a visible stone footing
+    bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, found, bd + 0.14).translate(0, 0.3 - found / 2, 0), C_PLINTH)));
     bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw, h, bd).translate(0, h / 2 + 0.24, 0), wallC)));
     // white corner boards (knutar) — THE tell of a Finnish timber house.
     // On painted walls only; bare tar/grey timber goes without.

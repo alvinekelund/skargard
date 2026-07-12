@@ -186,15 +186,17 @@ function grassGeometry() {
   return BufferGeometryUtils.mergeGeometries(parts, false);
 }
 
-// a reed clump — tall straw blades standing in the shallow water of
-// sheltered bays (they line every soft shore in the real archipelago)
+// a reed clump — straw blades standing in the shallow water of sheltered bays
+// (they line every soft shore in the real archipelago). Wider than tall and a
+// muted olive-tan: a reed BELT is a low dense band hugging the shore — the old
+// tall narrow bright-yellow clumps read as corn stooks on poles from any distance
 function reedGeometry() {
   const parts = [];
   for (const ry of [0, Math.PI / 2]) {
-    const p = new THREE.PlaneGeometry(0.95, 2.3);
-    p.translate(0, 1.12, 0);
+    const p = new THREE.PlaneGeometry(1.5, 1.55);
+    p.translate(0, 0.74, 0);
     p.rotateY(ry);
-    parts.push(paint(p, new THREE.Color(0xcdb96e)));
+    parts.push(paint(p, new THREE.Color(0xa89a62)));
   }
   return BufferGeometryUtils.mergeGeometries(parts, false);
 }
@@ -206,12 +208,12 @@ function reedTexture(seed) {
   const ctx = cv.getContext('2d');
   const rng = mulberry32(seed);
   ctx.clearRect(0, 0, S, S);
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 78; i++) {                        // dense — a belt, not lone straws
     const x = 6 + rng() * (S - 12);
     const lean = (rng() - 0.5) * 10;
-    const hgt = S * (0.72 + rng() * 0.28);
-    const warm = 175 + rng() * 60;
-    ctx.strokeStyle = `rgba(${warm | 0},${warm * 0.82 | 0},${warm * 0.42 | 0},${0.75 + rng() * 0.25})`;
+    const hgt = S * (0.55 + rng() * 0.45);              // varied blade heights, ragged top
+    const warm = 140 + rng() * 55;                      // muted olive-tan, not saturated straw
+    ctx.strokeStyle = `rgba(${warm | 0},${warm * 0.88 | 0},${warm * 0.5 | 0},${0.75 + rng() * 0.25})`;
     ctx.lineWidth = 1.4 + rng() * 1.4;
     ctx.beginPath();
     ctx.moveTo(x, S);
@@ -256,6 +258,22 @@ function pineGeometry(rng, { tiers = 9, spread = 0.72, overlap = 0.46, tip = 0.0
     const r = (1 - t) * spread + tip + (rng() - 0.5) * 0.1;    // narrows to a spire, ragged edge
     const h = 0.95 - t * 0.4;
     const cone = new THREE.ConeGeometry(Math.max(r, 0.05), h, 7);
+    // break the clean stacked-cone silhouette: rotate each tier so the facets
+    // never align, push the rim in/out around the circumference, and droop the
+    // rim unevenly — up close aligned tiers read as a paper pagoda, while real
+    // spruce branch whorls are ragged, uneven, sagging under their own needles
+    cone.rotateY(rng() * Math.PI * 2);
+    const cp = cone.attributes.position;
+    for (let vi = 0; vi < cp.count; vi++) {
+      const vx = cp.getX(vi), vz = cp.getZ(vi);
+      const vr = Math.hypot(vx, vz);
+      if (vr < 1e-4) continue;                                   // the apex stays a spire
+      const va = Math.atan2(vz, vx);
+      const n = 1 + 0.15 * Math.sin(va * 3 + i * 2.1) + 0.11 * Math.sin(va * 5.3 + i * 0.7);
+      cp.setX(vi, vx * n); cp.setZ(vi, vz * n);
+      cp.setY(vi, cp.getY(vi) - vr * 0.14 * (0.5 + 0.5 * Math.sin(va * 2.7 + i)));
+    }
+    cone.computeVertexNormals();
     cone.translate((rng() - 0.5) * 0.09, y, (rng() - 0.5) * 0.09); // per-tier wobble
     parts.push(paint(cone, COL.pine.clone().lerp(COL.pineDk, 0.35 + t * 0.5).offsetHSL(0, 0, (rng() - 0.5) * 0.04)));
     y += h * overlap;                                          // heavy overlap → continuous spire
@@ -592,6 +610,19 @@ const HARBOR_BASINS = [
   [194720, -39760, 280],   // Katajanokka / Viking berth channel
 ];
 
+// City waterfronts are BUILT — stone quays standing ~1.5 m proud of the sea,
+// not the natural low-shelf shore the simplified coastline bakes to (which the
+// waves then swallow, leaving whole street rows looking flooded). Inside these
+// discs the mainland-tile land is clamped to a quay minimum that rises fast
+// off the shoreline. [worldX, worldZ, radius] — same cores the props whitelist.
+const CITY_QUAYS = [
+  [194000, -40000, 4200],  // Helsinki
+  [42600, -71100, 3400],   // Turku
+  [233500, -65100, 2200],  // Porvoo
+  [82800, -2800, 1500],    // Hanko
+  [-86300, -32800, 1600],  // Mariehamn
+];
+
 // height above the real shoreline. Three tiers of honesty:
 //  · grid islands — REAL interior relief (EU-DEM), pinned to 0 at the OSM ring
 //  · e-only islands — REAL peak height scaling a procedural whaleback profile
@@ -612,6 +643,16 @@ function islandHeight(lx, lz, isl) {
         : THREE.MathUtils.smoothstep(sm, 0, 140) * 6;      // no DEM yet: low coast
       hm += fbm((lx + isl.x) * 0.09 + (lz + isl.z) * 0.02, (lz + isl.z) * 0.09, 3) * 0.3 * shoreN;
       h = hm - 0.05;
+      if (h < 1.4) {                                       // drowned city shore → quay
+        const wx = lx + isl.x, wz = lz + isl.z;
+        for (let k = 0; k < CITY_QUAYS.length; k++) {
+          const dqx = wx - CITY_QUAYS[k][0], dqz = wz - CITY_QUAYS[k][1];
+          if (dqx * dqx + dqz * dqz < CITY_QUAYS[k][2] * CITY_QUAYS[k][2]) {
+            h = Math.max(h, Math.min(sm * 0.7, 1.4));      // stands proud within 2 m of the ring
+            break;
+          }
+        }
+      }
     }
     if (h < 2.2 && h > -3.5) {                             // dredge filled-in harbour shelves
       const wx = lx + isl.x, wz = lz + isl.z;
@@ -1304,9 +1345,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
                   const rlz = nlz + (woz / wl) * c.dz * stepT + (treeRng() - 0.5) * c.dz * 0.5;
                   const ry = islandHeight(rlx, rlz, isl);
                   if (ry < -1.3 || ry > 0.2) continue;
-                  const sc = 0.75 + treeRng() * 0.6;
+                  // wide and LOW: the belt hugs the water — blade tips ~1.2 m
+                  // up, clumps broad enough to merge into a band along the shore
+                  const sc = 0.85 + treeRng() * 0.6;
                   _p.set(cx + rlx, Math.min(ry, -0.05), cz + rlz);
-                  _s.set(sc, sc * (0.85 + treeRng() * 0.35), sc);
+                  _s.set(sc * 1.35, sc * (0.62 + treeRng() * 0.24), sc * 1.35);
                   _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
                   _m.compose(_p, _q, _s);
                   reedMats.push(_m.clone());
@@ -1526,6 +1569,21 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       }
       if (water / samp < 0.45) continue;          // mostly over land → not a water bridge
       const ya = Math.max(heightAt(a[0], a[1]), 0.4), yb = Math.max(heightAt(b[0], b[1]), 0.4);
+      // long city bridges (Hakaniemi, Kulosaari, Lauttasaari…) follow their real
+      // polyline, drawn as a chain of near-flat spans — a single first→last
+      // chord arched 20 m high read as black cables floating over the rooftops
+      if (pp.length > 2 && len > 220) {
+        // one shared deck level: water-borne joints all ride at ~3.4 m, the two
+        // shore ends land on their real ground — a level causeway, no sawtooth
+        const deckY = (x, z) => { const h = Math.max(heightAt(x, z), 0.4); return h < 3 ? 3.4 : h; };
+        for (let i = 0; i < pp.length - 1; i++) {
+          const p1 = pp[i], p2 = pp[i + 1];
+          const segL = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+          if (segL < 8) continue;
+          bridges.push({ a: [p1[0], deckY(p1[0], p1[1]), p1[1]], b: [p2[0], deckY(p2[0], p2[1]), p2[1]], hw: bw.c === 1 ? 2.8 : 1.8, flat: true });
+        }
+        continue;
+      }
       bridges.push({ a: [a[0], ya, a[1]], b: [b[0], yb, b[1]], hw: bw.c === 1 ? 2.8 : 1.8 });
     }
     const grp = new THREE.Group();
@@ -1567,9 +1625,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const px = -dz, pz = dx;                                  // across deck
       const hw = br.hw + 0.5, depth = 0.55;                     // deck half-width, slab depth
       // clearance scales with the span: a narrow sound stays low (~4 m), a wide
-      // channel is a real boat route and rides high so a masted yacht / small
-      // ship passes under (up to ~22 m, like the archipelago's main bridges)
-      const clr = THREE.MathUtils.clamp(3.2 + len * 0.055, 4, 22);
+      // channel rides higher so a motorboat passes under — but capped LOW like
+      // the real beam bridges (Hakaniemi ~6 m, Lauttasaari ~11 m); a 20 m sine
+      // rainbow reads as a black cable floating over the skyline from a mile off.
+      // Chained flat spans (long city bridges) stay a near-level causeway deck.
+      const clr = br.flat ? 0.3 : THREE.MathUtils.clamp(3.2 + len * 0.04, 4, 11);
       const N = Math.max(6, Math.round(len / 8));
       const y0 = br.a[1] + 0.2, y1 = br.b[1] + 0.2;
       const yat = (t) => y0 + (y1 - y0) * t + Math.sin(Math.PI * t) * clr;
