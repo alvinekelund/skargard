@@ -793,6 +793,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const rockR = texLoader.load(B + 'rock_rough.jpg', (t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; });
 
   const islandShaders = [];
+  // the active city-core disc (x, z, r, on) — set per region rebuild; the
+  // terrain shader fades the aerial drape out inside it (see uCity above)
+  const _cityDisc = new THREE.Vector4(0, 0, 1, 0);
   const islandMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, envMapIntensity: 0.4 });
   islandMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
@@ -802,6 +805,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     sh.uniforms.uSat = { value: satellite.texture };
     sh.uniforms.uSatBox = { value: satellite.box };   // live Vector4 (x0,z0,w,h)
     sh.uniforms.uSatOn = { value: 0 };
+    sh.uniforms.uCity = { value: _cityDisc };         // (x,z,r,on) — drape off downtown
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n varying vec3 vWPos; varying vec3 vWNrm;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n vWPos = worldPosition.xyz;')
@@ -810,6 +814,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       .replace('#include <common>', `#include <common>
         uniform float uTime; uniform sampler2D uRockD, uRockN, uRockR;
         uniform sampler2D uSat; uniform vec4 uSatBox; uniform float uSatOn;
+        uniform vec4 uCity;
         varying vec3 vWPos; varying vec3 vWNrm;
         vec3 triW() { vec3 w = pow(abs(vWNrm), vec3(4.0)); return w / (w.x + w.y + w.z); }
         vec4 triSample(sampler2D t, float s) {
@@ -842,6 +847,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             float luma = dot(sat, vec3(0.299, 0.587, 0.114));
             float waterLike = (1.0 - smoothstep(0.16, 0.30, luma)) * step(sat.r, sat.b * 1.25);
             land *= 1.0 - waterLike;
+            // downtown the aerial photo is roofs, cars and streets that fight
+            // the extruded buildings standing on it — mottled camouflage ground.
+            // Inside a city core the drape fades out; the neutral procedural
+            // tint reads as paving instead.
+            land *= 1.0 - (1.0 - smoothstep(uCity.z * 0.8, uCity.z, distance(vWPos.xz, uCity.xy))) * uCity.w;
             diffuseColor.rgb = mix(diffuseColor.rgb, sat, land * uSatOn);
           }
         }`)
@@ -1729,6 +1739,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
+    // is this region a city? the drape switches off inside the core disc
+    _cityDisc.set(0, 0, 1, 0);
+    for (const [qx, qz, qr] of CITY_QUAYS) {
+      if ((cx0 - qx) ** 2 + (cz0 - qz) ** 2 < (qr + 2500) ** 2) { _cityDisc.set(qx, qz, qr, 1); break; }
+    }
 
     // islands whose bbox touches the build square, nearest first
     let set = [];

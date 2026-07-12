@@ -157,20 +157,25 @@ export function buildBeds(ctx, dest) {
   shoreLfo.connect(shoreLfoG); shoreLfoG.connect(shoreG.gain);
   shore.start(); shoreLfo.start();
 
-  // trees in the wind: the soft surging "shhhh" of a breeze through pines that
-  // you hear when you close a wooded shore — the land's own voice, riding above
-  // the low water-on-rock wash. Rises with shore proximity AND the breeze,
-  // gusting on its own slow LFO. Driven by setEnv(wooded) × setWind().
-  const leaves = ctx.createBufferSource();
-  leaves.buffer = whiteBuf; leaves.loop = true;
-  const leavesBp = ctx.createBiquadFilter();
-  leavesBp.type = 'bandpass'; leavesBp.frequency.value = 1900; leavesBp.Q.value = 0.5;
+  // trees in the wind — the land's own voice when you close a wooded shore,
+  // built from TWO voices like the real mixed forest: the deep, hollow
+  // soughing of pine crowns (honka humisee — the sound of the whole wood
+  // breathing) under the lighter pattering rustle of birch leaves. Each voice
+  // gusts on its own slow LFO so they weave instead of swelling in lockstep.
   const leavesG = ctx.createGain(); leavesG.gain.value = 0.0;
-  leaves.connect(leavesBp); leavesBp.connect(leavesG); leavesG.connect(dest);
-  const leavesLfo = ctx.createOscillator(); leavesLfo.frequency.value = 0.17;
-  const leavesLfoG = ctx.createGain(); leavesLfoG.gain.value = 0.35;   // gusts surge through the canopy
-  leavesLfo.connect(leavesLfoG); leavesLfoG.connect(leavesG.gain);
-  leaves.start(); leavesLfo.start();
+  leavesG.connect(dest);
+  for (const [freq, q, lvl, lfoHz, lfoAmt] of [[620, 0.6, 1.0, 0.13, 0.4], [2500, 0.7, 0.55, 0.21, 0.5]]) {
+    const src = ctx.createBufferSource();
+    src.buffer = pinkBuf; src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = q;
+    const vg = ctx.createGain(); vg.gain.value = lvl;
+    src.connect(bp); bp.connect(vg); vg.connect(leavesG);
+    const lfo = ctx.createOscillator(); lfo.frequency.value = lfoHz;
+    const lfoG = ctx.createGain(); lfoG.gain.value = lvl * lfoAmt;
+    lfo.connect(lfoG); lfoG.connect(vg.gain);
+    src.start(); lfo.start();
+  }
 
   return { whiteBuf, washGain: washG, windGain: windG, whistleGain: whG, shoreGain: shoreG, leavesGain: leavesG };
 }
