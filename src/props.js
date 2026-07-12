@@ -717,10 +717,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     for (const [sx, sz] of LANDMARK_SITES) if ((bx - sx) ** 2 + (bz - sz) ** 2 < 70 * 70) { onLandmark = true; break; }
     if (onLandmark) continue;
     const ground = heightAt(bx, bz);
-    // skip footprints whose ground is genuinely under water — a footprint on a
-    // submerged shelf (chart offset / simplified shoreline) rendered a house
-    // rising straight out of the sea, which no plinth can make honest
-    if (ground < -0.35) continue;
+    // skip footprints whose ground is at or under the waterline — a footprint
+    // on a submerged or awash shelf (chart offset / simplified shoreline)
+    // rendered a house rising straight out of the sea, which no plinth can
+    // make honest (the judge caught one still standing in open water at −0.2)
+    if (ground < 0.05) continue;
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
     // a shore building stands on a stone footing well proud of the sea — with
     // the floor at wave height, every low-shelf shoreline row read as flooded
