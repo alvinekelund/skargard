@@ -28,8 +28,11 @@ export const PRESETS = {
     // keep silhouette steps and tonal variety — the layered-headlands look.
     ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xcf9078, fogDensity: 0.00045,
     waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
-    cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 18, cloudOpacity: 0.78, cloudElevHi: false,
-    cloudSize: [1800, 3600],
+    // dusk clouds: a touch smaller and thinner than before — at [1800,3600] ×
+    // 0.78 a backlit wisp overhead could weigh on half the sky; still present,
+    // still shaded, just no longer heavy
+    cloudWarm: 0xffa25e, cloudCool: 0x9d8bb8, cloudCount: 14, cloudOpacity: 0.6, cloudElevHi: false,
+    cloudSize: [1400, 2600],
     // threshold >= 1.25: only true HDR (sun disc + glints) blooms, never the halo
     bloom: { strength: 0.18, radius: 0.55, threshold: 1.25 },
   },
