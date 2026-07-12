@@ -1359,9 +1359,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           } else if (cls === 3 && slabBudget > 0 && treeRng() < 0.2) {
             const slx = nlx + (treeRng() - 0.5) * c.dx, slz = nlz + (treeRng() - 0.5) * c.dz;
             const sy = islandHeight(slx, slz, isl);
-            if (sy < 0.2 || sy > 5.0) continue;            // the smooth coastal shelves
+            // ≥0.45 and sunk deeper — a slab on the waterline shelf read as a
+            // saucer hovering over the water at grazing angles
+            if (sy < 0.45 || sy > 5.0) continue;           // the smooth coastal shelves
             const sc = 1.1 + treeRng() * 2.6;
-            _p.set(cx + slx, sy - 0.25, cz + slz);
+            _p.set(cx + slx, sy - 0.45, cz + slz);
             _s.set(sc * (0.8 + treeRng() * 0.5), sc * 0.5, sc * (0.8 + treeRng() * 0.5));
             _q.setFromAxisAngle(_up, treeRng() * Math.PI * 2);
             _m.compose(_p, _q, _s);

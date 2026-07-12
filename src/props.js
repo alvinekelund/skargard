@@ -78,6 +78,7 @@ const M = {
   navy: new THREE.MeshStandardMaterial({ color: 0x24466e, roughness: 0.55 }),
   stone: new THREE.MeshStandardMaterial({ color: 0x8f8b82, roughness: 0.95 }),   // quay / breakwater
   plank: new THREE.MeshStandardMaterial({ color: 0xa98a5f, roughness: 0.82 }),   // fresh dock timber
+  lamp: new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xffd27a, emissiveIntensity: 1.5, roughness: 0.4 }),  // harbour lamp globe
 };
 // shared across region rebuilds — the streaming dispose pass must skip these
 Object.values(M).forEach((m) => { m.__shared = true; });
@@ -495,6 +496,18 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
   const walk = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.18, walkLen), M.plank);
   walk.position.set(bx, 0.42, bz); walk.rotation.y = ang + Math.PI / 2; walk.receiveShadow = true;
   group.add(walk);
+
+  // harbour lamps along the walkway — the warm globes that make a guest
+  // harbour glow at dusk, the first thing you pick out coming in from the sound
+  const nLamps = Math.max(2, Math.round(walkLen / 13));
+  for (let k = 0; k < nLamps; k++) {
+    const off = -walkLen / 2 + (k + 0.5) * (walkLen / nLamps);
+    const lx = bx + rx * off - vx * 0.8, lz = bz + rz * off - vz * 0.8;
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 2.5, 5), M.steel);
+    post.position.set(lx, 1.65, lz); group.add(post);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), M.lamp);
+    head.position.set(lx, 2.98, lz); group.add(head);
+  }
 
   const gap = walkLen / (H.pontoons + 1);
   for (let f = 0; f < H.pontoons; f++) {
