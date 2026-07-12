@@ -335,7 +335,7 @@ function connectionVessel() {
   return g;
 }
 
-export function createShips(scene) {
+export function createShips(scene, heightAt = null) {
   const ships = [];
 
   function addShip(model, route, speed, startFrac, dir, fixedYaw = false, kind = '') {
@@ -372,6 +372,32 @@ export function createShips(scene) {
     mesh.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
     mesh.position.set(x, 0, z);
     mesh.rotation.y = yaw;
+    // mooring hawsers: a moored ship is TIED to her quay — bow and stern lines
+    // running down to bollards on the land side (probed, not guessed), the
+    // detail that reads first when you sail close alongside
+    if (heightAt) {
+      const dims = FERRY_DIMS[kind.split('-')[0]] || { L: 200, B: 32 };
+      const fwd = [Math.sin(yaw), Math.cos(yaw)];                  // bow direction
+      const prp = [Math.cos(yaw), -Math.sin(yaw)];                 // starboard abeam
+      const probe = dims.B / 2 + 30;
+      const side = heightAt(x + prp[0] * probe, z + prp[1] * probe) >
+                   heightAt(x - prp[0] * probe, z - prp[1] * probe) ? 1 : -1;
+      const rope = new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 0.9 });
+      for (const [along, spread] of [[dims.L * 0.42, 22], [dims.L * 0.42, 8], [-dims.L * 0.42, -22], [-dims.L * 0.42, -8]]) {
+        // fairlead on the hull, high; bollard on the quay, low and offset along
+        const a = new THREE.Vector3(x + fwd[0] * along + prp[0] * side * (dims.B / 2 - 0.5),
+                                    10.5,
+                                    z + fwd[1] * along + prp[1] * side * (dims.B / 2 - 0.5));
+        const b = new THREE.Vector3(x + fwd[0] * (along + spread) + prp[0] * side * (dims.B / 2 + 13),
+                                    1.4,
+                                    z + fwd[1] * (along + spread) + prp[1] * side * (dims.B / 2 + 13));
+        const d = b.clone().sub(a);
+        const line = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, d.length(), 5), rope);
+        line.position.copy(a).addScaledVector(d, 0.5);
+        line.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
+        scene.add(line);
+      }
+    }
     scene.add(mesh);
     ships.push({ mesh, berthed: true, bx: x, bz: z, yaw, kind });
   }

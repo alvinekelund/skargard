@@ -185,6 +185,32 @@ function parishChurch() {
   return g;
 }
 
+// the Jurmo chapel (1846): a tiny 7.8 × 7 m weathered-grey timber chapel with
+// a steep dark shingle roof and a ridge cross, standing alone on the moraine
+// heath just off the village — the island's one landmark, ringed by its low
+// graveyard wall. Documented dimensions; the whole island knows this shape.
+function jurmoChapel() {
+  const g = new THREE.Group();
+  const grey = new THREE.MeshStandardMaterial({ color: 0x8d8578, roughness: 0.92 });
+  const shingle = new THREE.MeshStandardMaterial({ color: 0x3a332c, roughness: 0.9 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe4dfd2, roughness: 0.8 });
+  g.add(box(7.0, 3.1, 7.8, 0, 1.55, 0, grey));                    // the 7.8 × 7 m hall
+  const shp = new THREE.Shape();                                   // explicit gable: apex up
+  shp.moveTo(-3.9, 0); shp.lineTo(3.9, 0); shp.lineTo(0, 2.7); shp.closePath();
+  const rg = new THREE.ExtrudeGeometry(shp, { depth: 8.4, bevelEnabled: false });
+  rg.translate(0, 3.05, -4.2);
+  const roof = new THREE.Mesh(rg, shingle);
+  g.add(roof);
+  g.add(box(1.1, 1.9, 0.12, 0, 1.0, 3.96, white));                // white door surround
+  g.add(box(0.12, 1.1, 0.12, 0, 6.3, 0, white));                  // ridge cross
+  g.add(box(0.7, 0.12, 0.12, 0, 6.5, 0, white));
+  // the low graveyard wall around it
+  for (const [w, d, ox, oz] of [[16, 0.5, 0, 7], [16, 0.5, 0, -7], [0.5, 14, 8, 0], [0.5, 14, -8, 0]]) {
+    g.add(box(w, 0.7, d, ox, 0.35, oz, new THREE.MeshStandardMaterial({ color: 0x77716a, roughness: 0.95 })));
+  }
+  return g;
+}
+
 export function createLandmarks(scene) {
   const items = [
     { build: helsinkiCathedral, lat: 60.1697, lon: 24.9521, y: 7, yaw: 0 },
@@ -193,6 +219,7 @@ export function createLandmarks(scene) {
     // the parish churches of the big archipelago islands, at their real spots
     { build: parishChurch, lat: 60.1953, lon: 21.9106, y: 6, yaw: 0.25 },  // Nagu kyrka
     { build: parishChurch, lat: 60.1637, lon: 21.5750, y: 8, yaw: 1.85 },  // Korpo kyrka
+    { build: jurmoChapel, lat: 59.8239, lon: 21.5829, y: 2.2, yaw: 0.3 },  // Jurmo chapel (1846)
   ];
   const group = new THREE.Group();
   for (const it of items) {

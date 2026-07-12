@@ -70,7 +70,19 @@ const boat = createBoat(scene);
 
 // ship traffic on its real routes: Viking + Silja on the Turku–Åland fairway,
 // the yellow road ferry, and the Utö-line connection vessel
-const ships = createShips(scene);
+// berth-side probe over the FULL island pool — heightAt only sees the streamed
+// region, and the Helsinki terminals aren't in it at spawn
+const globalHeightAt = (x, z) => {
+  let m = -10;
+  for (const i of archipelago.islands) {
+    const lx = x - i.x, lz = z - i.z, b = i.bbox;
+    if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
+    const h = archipelago.islandHeight(lx, lz, i);
+    if (h > m) m = h;
+  }
+  return m;
+};
+const ships = createShips(scene, globalHeightAt);
 
 // ambient summer traffic that follows the helm — sloops actually sailing
 // (heeled, real sail shapes) + motor cruisers, all keeping off the rock
