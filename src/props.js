@@ -694,9 +694,15 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     for (const [cx, cz, r] of CITY) if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return true;
     return false;
   };
+  // landmark churches (landmarks.js) stand on these spots — the generic NLS
+  // footprint that shares the site would draw a white box through the nave
+  const LANDMARK_SITES = [[23555, -43451], [4760, -39935]];   // Nagu kyrka, Korpo kyrka
   let placed = 0;
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
     if (placed >= 450) break;
+    let onLandmark = false;
+    for (const [sx, sz] of LANDMARK_SITES) if ((bx - sx) ** 2 + (bz - sz) ** 2 < 70 * 70) { onLandmark = true; break; }
+    if (onLandmark) continue;
     const ground = heightAt(bx, bz);
     // skip footprints whose ground is genuinely under water — a footprint on a
     // submerged shelf (chart offset / simplified shoreline) rendered a house
