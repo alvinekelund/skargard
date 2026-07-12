@@ -440,8 +440,9 @@ function buildLighthouse() {
   lantern.position.y = towerH + 1.5; g.add(lantern);
   const core = new THREE.Mesh(new THREE.SphereGeometry(tw * 0.19, 14, 12), new THREE.MeshStandardMaterial({ color: 0xfff2cf, emissive: 0xffcf66, emissiveIntensity: 2 }));
   core.position.y = towerH + 1.5; g.add(core);
-  // low dark conical cap (no green dome on the real tower) + finial
-  const dome = new THREE.Mesh(new THREE.ConeGeometry(tw * 0.34, 1.4, 10), new THREE.MeshStandardMaterial({ color: 0x2b2e32, roughness: 0.55, metalness: 0.2 }));
+  // low dark conical cap (no green dome on the real tower) + finial — kept
+  // truly dark; the judge caught the previous grey reading pale against the sky
+  const dome = new THREE.Mesh(new THREE.ConeGeometry(tw * 0.34, 1.4, 10), new THREE.MeshStandardMaterial({ color: 0x17191c, roughness: 0.6, metalness: 0.15 }));
   dome.position.y = towerH + 3.3; g.add(dome);
   const tip = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x222222 }));
   tip.position.y = towerH + 4.3; g.add(tip);

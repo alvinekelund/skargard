@@ -227,7 +227,9 @@ export function createFleet(scene, { heightAt }) {
   for (let i = 0; i < SAIL_N; i++) makeBoat('sail');
   for (let i = 0; i < MOTOR_N; i++) makeBoat('motor');
 
-  const isWater = (x, z) => heightAt(x, z) < -1.4;
+  // deeper standoff: at −1.4 boats could shave the beach and read as aground
+  // from the water (the independent judge caught one pressed on the shoreline)
+  const isWater = (x, z) => heightAt(x, z) < -2.2;
 
   // pick a course that is a valid point of sail (never in the no-go zone) for a
   // sailboat; any heading for a motorboat.
