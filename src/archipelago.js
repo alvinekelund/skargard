@@ -341,6 +341,29 @@ function juniperGeometry(rng) {
   return BufferGeometryUtils.mergeGeometries(parts, false);
 }
 
+// a kelo — the standing silver-grey DEAD pine that marks every exposed rocky
+// point of the real outer archipelago: a bare weather-polished bole with a
+// broken top and a few stripped branches. No canopy, no green — the skeleton
+// tree the wind left behind. THE signature of the wind-line.
+function keloGeometry(rng) {
+  const parts = [];
+  const silver = new THREE.Color(0x8f8878);           // weathered wood-grey, not white plastic
+  const trunkG = new THREE.CylinderGeometry(0.03, 0.12, 3.6, 6);
+  trunkG.translate(0, 1.8, 0);
+  parts.push(paint(trunkG, silver.clone().offsetHSL(0, 0, (rng() - 0.5) * 0.06)));
+  const nBr = 3 + Math.floor(rng() * 3);
+  for (let i = 0; i < nBr; i++) {
+    const h = 1.3 + rng() * 2.0, len = 0.5 + rng() * 0.9, ang = rng() * Math.PI * 2;
+    const br = new THREE.CylinderGeometry(0.018, 0.05, len, 4);
+    br.translate(0, len / 2, 0);
+    br.rotateZ(1.0 + rng() * 0.6);                          // reaching out and up
+    br.rotateY(ang);
+    br.translate(0, h, 0);
+    parts.push(paint(br, silver.clone().offsetHSL(0, 0, -0.05 + rng() * 0.08)));
+  }
+  return BufferGeometryUtils.mergeGeometries(parts, false);
+}
+
 // lumpy granite boulder (Jurmo's moraine stones)
 function boulderGeometry(rng) {
   const geo = new THREE.IcosahedronGeometry(1, 3);          // smoother base
@@ -949,13 +972,14 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     birchGeometry(mulberry32(203), { trunkH: 2.5, full: 1.15 }), // short, full
   ];
   const juniperGeo = juniperGeometry(mulberry32(3));
+  const keloGeo = keloGeometry(mulberry32(41));
   const boulderGeo = boulderGeometry(mulberry32(4));
   const grassGeo = grassGeometry();
   const reedGeo = reedGeometry();
   const slabGeo = slabGeometry(mulberry32(6));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
   let pineMats = [[], [], []], scotsMats = [[], [], []], birchMats = [[], [], []];
-  let juniperMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
+  let juniperMats = [], keloMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
   // ── islands from the REAL chart: every polygon is an actual island outline
@@ -1297,6 +1321,30 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       jp++;
     }
 
+    // kelo snags — the silver dead pines standing on the exposed points of the
+    // outer islands, leaning away from the prevailing southwesterly. Sparse:
+    // one or a few per bald/sparse island, never in the sheltered woods.
+    if (!isl.cut && kind !== 'forest' && isl.A > 2500) {
+      const ktarget = Math.min(1 + Math.floor(isl.A / 60000), 4);
+      let kp = 0, kt = 0;
+      while (kp < ktarget && kt < ktarget * 10) {
+        kt++;
+        const [lx, lz] = samp();
+        const y = islandHeight(lx, lz, isl);
+        if (y < 0.7 || y > H + 0.3) continue;                  // on the rock, not in the wash
+        if (satGrid && coverAt(isl, lx, lz) === 1) continue;   // never inside live forest
+        const sc = 1.3 + treeRng() * 1.1;
+        _p.set(cx + lx, y - 0.12, cz + lz);
+        _s.set(sc * (0.85 + treeRng() * 0.3), sc, sc * (0.85 + treeRng() * 0.3));
+        const windLean2 = 2.15 + Math.sin(isl.x * 0.0007 + isl.z * 0.0009) * 0.6;
+        _q.setFromAxisAngle(new THREE.Vector3(Math.cos(windLean2), 0, Math.sin(windLean2)), 0.08 + treeRng() * 0.18);
+        _q.multiply(new THREE.Quaternion().setFromAxisAngle(_up, treeRng() * Math.PI * 2));
+        _m.compose(_p, _q, _s);
+        keloMats.push(_m.clone());
+        kp++;
+      }
+    }
+
     // scattered granite — moraine boulders AND big glacial erratics/outcrops.
     // The Finnish shore is strewn with them; they give the nature its
     // granularity so a "bare" rock isn't a smooth hump. On forested islands
@@ -1506,7 +1554,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   for (const m of [islandMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const arr of [pineGeos, scotsGeos, birchGeos]) for (const gg of arr) { gg.trunk.__shared = true; gg.canopy.__shared = true; }
-  for (const g of [juniperGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
+  for (const g of [juniperGeo, keloGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
 
   // tint > 0 gives every instance a small, STABLE per-tree colour offset
   // (brightness + a warm/cool hue nudge) seeded from its world position, so a
@@ -1765,7 +1813,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = [[], [], []]; scotsMats = [[], [], []]; birchMats = [[], [], []];
-    juniperMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
+    juniperMats = []; keloMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 23000;                   // region-wide cap: near islands (sorted first) win
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
@@ -1856,6 +1904,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       makeInstanced(birchGeos[v].canopy, birchMat, birchMats[v], depthLeaf, 1.0);
     }
     makeInstanced(juniperGeo, juniperMat, juniperMats, depthLeaf, 0.7);
+    makeInstanced(keloGeo, trunkMat, keloMats, null, 0.5);
     makeInstanced(boulderGeo, boulderMat, boulderMats);
     makeInstanced(slabGeo, boulderMat, slabMats);
     const grassMesh = makeInstanced(grassGeo, grassMat, grassMats);

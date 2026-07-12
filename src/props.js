@@ -928,6 +928,39 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
     placed++;
   }
+
+  // ── fågelskär: gulls STANDING on the bare crowns of the small outer
+  //    skerries — white specks on the grey rock, the way every real bird
+  //    skerry reads from a passing boat ──
+  let roosts = 0;
+  for (const isl of activeSet) {
+    if (roosts >= 30) break;
+    if (isl.cut || isl.kind !== 'bald' || isl.A > 6000 || isl.A < 300) continue;
+    if (rng() < 0.45) continue;                        // not every rock hosts a colony
+    let hx = 0, hz = 0, hy = -9;
+    for (let n = 0; n < 24; n++) {
+      const lx = isl.bbox.minX + rng() * (isl.bbox.maxX - isl.bbox.minX);
+      const lz = isl.bbox.minZ + rng() * (isl.bbox.maxZ - isl.bbox.minZ);
+      const y = islandHeight(lx, lz, isl);
+      if (y > hy) { hy = y; hx = lx; hz = lz; }
+    }
+    if (hy < 0.4) continue;
+    const nB = 2 + Math.floor(rng() * 4);
+    for (let k = 0; k < nB && roosts < 30; k++) {
+      const lx = hx + (rng() - 0.5) * 7, lz = hz + (rng() - 0.5) * 7;
+      const gy = islandHeight(lx, lz, isl);
+      if (gy < 0.3) continue;
+      const fx = isl.x + lx, fz = isl.z + lz, fy = rng() * Math.PI * 2;
+      const body = new THREE.SphereGeometry(0.16, 6, 5);
+      body.scale(1.6, 0.85, 0.95); body.rotateY(fy); body.translate(fx, gy + 0.17, fz);
+      bodyGeos.push(paintGeo(body, C_WHITE));
+      const head = new THREE.SphereGeometry(0.07, 5, 4);
+      head.translate(fx + Math.sin(fy) * 0.24, gy + 0.33, fz + Math.cos(fy) * 0.24);
+      bodyGeos.push(paintGeo(head, C_WHITE));
+      roosts++;
+    }
+  }
+
   if (bodyGeos.length) {
     const bodies = new THREE.Mesh(mergeGeometries(bodyGeos, false),
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
