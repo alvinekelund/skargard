@@ -308,6 +308,7 @@ function animate() {
   }
   audio.setSpeed(boat.state.speed);
   audio.setWind(THREE.MathUtils.clamp((wind.speed - 0.55) / 0.85, 0, 1));
+  audio.setHeel(boat.state.heel, dt);   // the rig creaks as she loads up
   composer.render();
 
   if (firstFrame) {

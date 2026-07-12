@@ -715,11 +715,12 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     //    differently-coloured segments, the way a real Helsinki street reads.
     //    Small plans fall through to the timber-cottage code. ──
     const foot = bw * bd;
-    // urban block inside a real city core (down to small infill plans — a
-    // downtown has NO red timber cottages); elsewhere only a big footprint is
-    // urban, and a village big footprint is a timber barn, not a pastel block.
+    // urban block ONLY inside a real city core (down to small infill plans — a
+    // downtown has NO red timber cottages). A big village footprint must stay
+    // a timber barn/warehouse: gating on footprint alone sent every Nauvo and
+    // Utö barn into the pastel apartment-block path — city slabs in a village.
     const cityHere = inCity(bx, bz);
-    if (cls === 0 && (cityHere ? foot > 90 : foot > 240)) {
+    if (cls === 0 && cityHere && foot > 90) {
       const rngU = mulberry32((Math.floor(bx * 11 + bz * 17) >>> 0) || 1);
       // vary storeys per building (not just by footprint) so the waterfront
       // skyline undulates 3–8 floors instead of every block maxing at a flat 7;

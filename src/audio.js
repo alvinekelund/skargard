@@ -204,6 +204,44 @@ export function createAudio() {
   let speedNorm = 0;                       // 0..1, from setSpeed
   let windNorm = 0, shoreNorm = 0, harborNorm = 0, woodedNorm = 0, motorOn = false, throttle = 0;
   let lapTimer = null, gullTimer = null, clinkTimer = null;
+  let heelPrev = 0, lastCreak = 0;
+
+  // the rig and deck CREAK as she loads up — a low woody groan whenever the
+  // heel changes fast (a gust leaning her over, a tack coming through). Two
+  // detuned low band-passed noise bursts with a slow downward bend: timber
+  // and rope working, the sound that makes a boat feel like a living thing.
+  function creak(intensity) {
+    const t = ctx.currentTime + 0.01;
+    for (const [freq, lvl, dur] of [[210 + Math.random() * 90, 1.0, 0.5], [96, 0.55, 0.62]]) {
+      const src = ctx.createBufferSource();
+      src.buffer = whiteBuf; src.loop = true;
+      src.playbackRate.setValueAtTime(1.0, t);
+      src.playbackRate.linearRampToValueAtTime(0.72, t + dur);        // the groan bends down
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 9;
+      bp.frequency.linearRampToValueAtTime(freq * 0.8, t + dur);
+      const g = ctx.createGain();
+      const peak = 0.10 * intensity * lvl;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.001), t + 0.09);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(bp); bp.connect(g); g.connect(master);
+      src.start(t); src.stop(t + dur + 0.05);
+    }
+  }
+
+  // heel (radians) sampled every frame; a fast change past the threshold works
+  // the rig. Rate-limited so a rolly sea doesn't turn into a haunted house.
+  function setHeel(heel, dt) {
+    if (!ctx || muted || !whiteBuf || !dt) { heelPrev = heel; return; }
+    const rate = Math.abs(heel - heelPrev) / dt;         // rad/s
+    heelPrev = heel;
+    const now = ctx.currentTime;
+    if (rate > 0.055 && now - lastCreak > 2.2 + Math.random() * 2.5) {
+      lastCreak = now;
+      creak(Math.min(1, rate / 0.16));
+    }
+  }
 
   // a small diesel auxiliary: a low throbbing tone (firing frequency) with a
   // sub and a little grille rattle, amplitude-pulsed so it chugs
@@ -359,5 +397,5 @@ export function createAudio() {
     if (master) master.gain.setTargetAtTime(muted ? 0 : 0.8, ctx.currentTime, 0.2);
   }
 
-  return { start, setSpeed, setWind, setEnv, setMuted, get muted() { return muted; } };
+  return { start, setSpeed, setWind, setEnv, setHeel, setMuted, get muted() { return muted; } };
 }

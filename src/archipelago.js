@@ -42,7 +42,10 @@ const COL = {
 
 /* foliage material: gentle wind sway + a subtle sun-gated rim */
 function makeFoliageMat(shaders, sunViewDir, { roughness = 0.85, sway = 0.09, swayLo = 1.0, swayHi = 4.5, rimStrength = 0.5, warm = 0.22 }) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness: 0, envMapIntensity: 0.4 });
+  // envMapIntensity lifted so the sky fills the shadow side of a canopy —
+  // against a low sun whole tree masses went pitch black; real foliage keeps
+  // a blue-grey sheen from the open sky even when the sun is behind it
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness: 0, envMapIntensity: 0.7 });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.uniforms.uSway = { value: sway };
