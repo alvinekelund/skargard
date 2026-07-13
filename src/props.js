@@ -814,7 +814,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const rb = rng2();
       const wallC = rb < 0.48 ? C_DKRED : rb < 0.6 ? C_TAR : rb < 0.74 ? C_GREY : C_RED;
       const roofC = rng2() < 0.5 ? C_ROOF : C_ROOF2;
-      const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
+      const ridgeYaw = ang + (bw >= bd ? 0 : Math.PI / 2);   // ridge along the LONG wall
       const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
       const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
       bodyGeos.push(placeF(paintGeo(new THREE.BoxGeometry(bw + 0.14, found, bd + 0.14).translate(0, 0.3 - found / 2, 0), C_PLINTH)));
@@ -846,7 +846,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const roofC = cls === 2 ? C_ROOF : rng2() < 0.2 ? C_TILE : (rng2() < 0.5 ? C_ROOF : C_ROOF2);
     // ridge runs along the LONG axis of the real footprint
     const along = bw >= bd ? bw : bd, across = bw >= bd ? bd : bw;
-    const ridgeYaw = ang + (bw >= bd ? Math.PI / 2 : 0);
+    const ridgeYaw = ang + (bw >= bd ? 0 : Math.PI / 2);   // ridge along the LONG wall
     const place = (geo) => { geo.rotateY(ridgeYaw); geo.translate(bx, baseY, bz); return geo; };
     const placeF = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
     // plinth + walls (footprint axes, not ridge axes) — the plinth runs from
