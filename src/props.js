@@ -834,10 +834,12 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const r = rng2();
     // the Finnish coast palette: falu red with white knuts dominates, then
     // ochre yellow, white, weathered grey timber; sheds also go tar-brown
+    // falu red overwhelmingly dominates the real coast; ochre yellow is the
+    // occasional accent, white/grey rarer still — ~70% red : 8% yellow (≈9:1)
     const wallC = cls === 2 ? C_WHITE
-      : cls === 1 ? (r < 0.55 ? C_RED : r < 0.75 ? C_TAR : r < 0.9 ? C_DKRED : C_GREY)
-      : r < 0.62 ? (rng2() < 0.3 ? C_DKRED : C_RED)
-      : r < 0.74 ? C_YELL : r < 0.86 ? C_WHITE : C_GREY;
+      : cls === 1 ? (r < 0.62 ? C_RED : r < 0.78 ? C_TAR : r < 0.92 ? C_DKRED : C_GREY)
+      : r < 0.70 ? (rng2() < 0.3 ? C_DKRED : C_RED)
+      : r < 0.78 ? C_YELL : r < 0.90 ? C_WHITE : C_GREY;
     const painted = wallC !== C_TAR && wallC !== C_GREY;
     // trim (knuts, bargeboards, doors, frames) only on the nearest houses —
     // the list is distance-sorted, and past ~500 m the boards are sub-pixel

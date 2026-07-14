@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /* Ambient summer traffic — the water is never empty out here in July.
    A player-following field of small craft that ACTUALLY sail: cruising sloops
@@ -110,18 +111,20 @@ function buildSloop(rng) {
   const trunkTop = new THREE.Mesh(new THREE.BoxGeometry(B * 0.5, 0.06, L * 0.3), _teak);
   trunkTop.position.set(0, 0.7, L * 0.06); g.add(trunkTop);
 
-  // lifelines: bow/stern pulpit stanchions + a thin rail (reads as safety rail)
-  const railMat = _spar;
+  // lifelines: bow/stern stanchions + a thin rail — the 12 tiny cylinders are
+  // merged into ONE mesh so a whole harbour of boats isn't hundreds of draw
+  // calls (weak GPUs choked on the un-merged fleet, especially in the reflection)
+  const railParts = [];
   for (const side of [1, -1]) {
     for (let k = 0; k < 5; k++) {
       const z = L * 0.4 - k * (L * 0.8 / 4);
-      const st = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.6, 4), railMat);
-      st.position.set(side * B * 0.45, 0.46, z); g.add(st);
+      const st = new THREE.CylinderGeometry(0.015, 0.015, 0.6, 4);
+      st.translate(side * B * 0.45, 0.46, z); railParts.push(st);
     }
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, L * 0.82, 4), railMat);
-    rail.rotation.x = Math.PI / 2;
-    rail.position.set(side * B * 0.45, 0.74, L * 0.0); g.add(rail);
+    const rail = new THREE.CylinderGeometry(0.02, 0.02, L * 0.82, 4);
+    rail.rotateX(Math.PI / 2); rail.translate(side * B * 0.45, 0.74, 0); railParts.push(rail);
   }
+  g.add(new THREE.Mesh(mergeGeometries(railParts, false), _spar));
 
   const mastZ = L * 0.08, mastH = L * 1.42;
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, mastH, 6), _spar);

@@ -236,7 +236,7 @@ function reedTexture(seed) {
 // a low rounded coastal rock slab — the smooth glaciated plates the Finnish
 // shore is made of (wider and flatter than a moraine boulder, lighter grey)
 function slabGeometry(rng) {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const geo = new THREE.IcosahedronGeometry(1, 1);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
@@ -364,9 +364,11 @@ function keloGeometry(rng) {
   return BufferGeometryUtils.mergeGeometries(parts, false);
 }
 
-// lumpy granite boulder (Jurmo's moraine stones)
+// lumpy granite boulder (Jurmo's moraine stones). Detail 1 (80 faces): the
+// shape is all low-frequency sine lumps, so detail 3 (1280 faces) was 16× the
+// triangles for zero visible gain — and there are thousands of these instanced.
 function boulderGeometry(rng) {
-  const geo = new THREE.IcosahedronGeometry(1, 3);          // smoother base
+  const geo = new THREE.IcosahedronGeometry(1, 1);
   const p = geo.attributes.position;
   // gentle low-frequency lumps instead of per-vertex spikes → rounded glacial erratic
   const ax = 0.85 + rng() * 0.3, ay = 0.55 + rng() * 0.2, az = 0.85 + rng() * 0.3;
@@ -1363,7 +1365,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     // more boulders and more big erratics than a wooded island, which is what
     // gives that ground its granular, glaciated texture instead of a smooth heath
     const heathy = !isl.cut && kind !== 'forest';
-    const btarget = Math.min(Math.floor(isl.A * (isl.cut ? 0.0008 : kind === 'forest' ? 0.0045 : 0.015)), isl.cut ? 40 : heathy ? 360 : 190);
+    const btarget = Math.min(Math.floor(isl.A * (isl.cut ? 0.0008 : kind === 'forest' ? 0.0045 : 0.012)), isl.cut ? 40 : heathy ? 240 : 170);
     let bp = 0, bt = 0;
     while (bp < btarget && bt < btarget * 8) {
       bt++;
@@ -1480,6 +1482,34 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   let activeSet = [];
   let landmark = null;
   let propsRef = null;
+
+  // Spatial grid over the active islands so heightAt/woodedAt test only the few
+  // islands near a query point instead of linear-scanning the whole streamed
+  // set. This is the hot path: the ambient fleet probes heightAt ~40×/frame for
+  // land avoidance, boat collision hits it too, and the audio env samples it —
+  // a full scan there dropped weak machines to a couple of FPS. Islands with a
+  // large bbox (coast/mainland tiles) would smear across hundreds of cells, so
+  // they stay in an always-checked `bigIslands` list; everything else is bucketed.
+  const GRID_CELL = 180;
+  let activeGrid = new Map();
+  let bigIslands = [];
+  const _cellKey = (cx, cz) => cx * 100003 + cz;
+  function buildActiveGrid() {
+    activeGrid = new Map();
+    bigIslands = [];
+    for (const i of activeSet) {
+      const b = i.bbox;
+      if (b.maxX - b.minX > 1000 || b.maxZ - b.minZ > 1000) { bigIslands.push(i); continue; }
+      const x0 = Math.floor((i.x + b.minX - 8) / GRID_CELL), x1 = Math.floor((i.x + b.maxX + 8) / GRID_CELL);
+      const z0 = Math.floor((i.z + b.minZ - 8) / GRID_CELL), z1 = Math.floor((i.z + b.maxZ + 8) / GRID_CELL);
+      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+        const k = _cellKey(cx, cz);
+        let arr = activeGrid.get(k);
+        if (!arr) { arr = []; activeGrid.set(k, arr); }
+        arr.push(i);
+      }
+    }
+  }
   const activeCenter = new THREE.Vector2(1e9, 1e9);
 
   // ── data overlay (D): draw exactly what comes from real data ──
@@ -1592,6 +1622,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     mesh.frustumCulled = false;
     mesh.castShadow = true; mesh.receiveShadow = true;
     if (depthMat) mesh.customDepthMaterial = depthMat;
+    // Layer 1 only: the thousands of instanced trees/grass/boulders are the
+    // scene's heaviest geometry and were re-rendered in full in the water
+    // reflection every frame. The reflection's mirror camera sees only layer 0,
+    // so this drops them from that pass entirely (a whole scene's worth of
+    // triangles) while the main + shadow cameras — which enable layer 1 — keep
+    // them. Reflections of the treeline are subtle; the frame budget is not.
+    mesh.layers.set(1);
     activeGroup.add(mesh);
     return mesh;
   }
@@ -1896,6 +1933,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     job = null;
     disposeActive();                      // the old region leaves only now
     activeSet = set;
+    buildActiveGrid();                     // rebuild the lookup grid for the new set
     landmark = null;
 
     // one merged mesh for the whole region → a single draw call
@@ -1993,33 +2031,41 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   // max terrain height at a world point — used for boat↔island collision.
   // Uses the active region when built (the boat is always inside it).
+  // candidate islands whose bbox may contain (x,z): the big always-checked tiles
+  // plus whatever sits in this point's grid cell. Falls back to the full list
+  // only before the first region has streamed in (activeSet still empty).
+  const _htA = (x, z, cb) => {
+    if (!activeSet.length) { for (const i of islands) cb(i); return; }
+    for (let k = 0; k < bigIslands.length; k++) cb(bigIslands[k]);
+    const arr = activeGrid.get(_cellKey(Math.floor(x / GRID_CELL), Math.floor(z / GRID_CELL)));
+    if (arr) for (let k = 0; k < arr.length; k++) cb(arr[k]);
+  };
+
   function heightAt(x, z) {
     let m = -10;
-    const pool = activeSet.length ? activeSet : islands;
-    for (const i of pool) {
-      const lx = x - i.x, lz = z - i.z;
-      const b = i.bbox;
-      if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
+    _htA(x, z, (i) => {
+      const lx = x - i.x, lz = z - i.z, b = i.bbox;
+      if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) return;
       const h = islandHeight(lx, lz, i);
       if (h > m) m = h;
-    }
+    });
     return m;
   }
 
   // is the land at (x,z) wooded? 1 = the photo/OSM says forest, 0 = bare rock /
   // heath / open. Used by the soundscape so only a pine-clad shore whispers.
   function woodedAt(x, z) {
-    const pool = activeSet.length ? activeSet : islands;
-    for (const i of pool) {
-      const lx = x - i.x, lz = z - i.z;
-      const b = i.bbox;
-      if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
-      if (islandHeight(lx, lz, i) < 0.15) continue;        // not on this island's land
-      if (i.cover) return forestAt(i, lx, lz) ? 1 : 0;     // the photo is authoritative
-      if (i._wood && i._wood.length) return inCover(i._wood, x, z) ? 1 : 0;
-      return i.kind === 'forest' ? 1 : 0;                  // no grid: the island's character
-    }
-    return 0;
+    let result = 0;
+    _htA(x, z, (i) => {
+      if (result) return;                                  // first hit wins (early-outs)
+      const lx = x - i.x, lz = z - i.z, b = i.bbox;
+      if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) return;
+      if (islandHeight(lx, lz, i) < 0.15) return;          // not on this island's land
+      if (i.cover) { result = forestAt(i, lx, lz) ? 1 : 0.0001; return; }
+      if (i._wood && i._wood.length) { result = inCover(i._wood, x, z) ? 1 : 0.0001; return; }
+      result = i.kind === 'forest' ? 1 : 0.0001;           // no grid: the island's character
+    });
+    return result >= 1 ? 1 : 0;
   }
 
   const _inv = new THREE.Matrix4();

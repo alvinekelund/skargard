@@ -121,6 +121,7 @@ export function createEnvironment(scene, renderer) {
   const sunLight = new THREE.DirectionalLight(preset.sunColor, preset.sunInt);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.camera.layers.enable(1);   // trees/rocks (layer 1) still cast shadows
   // ortho box sized to the visible sailing bubble; frustum long enough for a grazing sun
   const SB = 170;
   sunLight.shadow.camera.left = -SB; sunLight.shadow.camera.right = SB;

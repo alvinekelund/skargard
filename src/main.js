@@ -38,6 +38,7 @@ container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.5, 16000);
+camera.layers.enable(1);   // see the instanced trees/rocks (layer 1, kept off the water reflection)
 camera.position.set(0, 12, 24);
 
 /* ── world ── */
