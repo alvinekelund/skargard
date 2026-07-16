@@ -22,9 +22,9 @@ npm run dev      # → http://localhost:5183
 `M` **chart** (pan/zoom the whole real Archipelago Sea, click open water to sail there) ·
 `C` camera (chase → **helm POV** → orbit) · `T` time of day ·
 `I` **data overlay** (shows which features come from real data vs procedural, with rendered-vs-total counts) ·
-🔊 button mutes the sound (a procedural soundscape — hull laps, wind in the rig,
-a shore wash that rises as you close the land, halyards tapping masts in the guest
-harbours, gulls, and the diesel when you motor)
+🔊 button mutes the sound (a deliberately quiet procedural soundscape — soft hull
+laps, warm air, distant gulls, shore wash and leaves near land, plus rare pentatonic
+tones like light on the water; the auxiliary stays subdued when you motor)
 
 ## How it feels
 
