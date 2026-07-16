@@ -126,6 +126,13 @@ const keymap = {
   ArrowUp: 'sheetIn', KeyW: 'sheetIn', ArrowDown: 'sheetOut', KeyS: 'sheetOut',
 };
 addEventListener('keydown', (e) => {
+  // The controls are a hint, not permanent scenery. Bring them back briefly
+  // whenever the player touches the keyboard, then let the view clear again.
+  const controls = document.querySelector('.hud-controls');
+  if (controls) {
+    controls.classList.remove('go'); controls.classList.add('remind');
+    requestAnimationFrame(() => controls.classList.add('go'));
+  }
   if (keymap[e.code]) { input[keymap[e.code]] = true; e.preventDefault(); }
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyT') { env.setPreset(env.presetName === 'day' ? 'golden' : 'day'); applyBloom(); }
@@ -185,13 +192,17 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const _povPos = new THREE.Vector3(), _povLook = new THREE.Vector3(), _povUp = new THREE.Vector3();
 function updatePOV(dt) {
   boat.group.updateMatrixWorld();
-  _povPos.set(0, 1.62, -3.5); boat.group.localToWorld(_povPos);   // seated eye at the helm
-  _povLook.set(0, 1.15, 9); boat.group.localToWorld(_povLook);    // forward down the deck, slightly down
+  // A relaxed standing helm view: high enough to see the water and approaching
+  // islands over the coachroof, but still close enough that cockpit, winches and
+  // running rigging frame the scene. The old seated view aimed into the cabin
+  // trunk and made the opening frame feel cramped.
+  _povPos.set(0.62, 2.02, -4.15); boat.group.localToWorld(_povPos);
+  _povLook.set(0.18, 2.45, 16); boat.group.localToWorld(_povLook);
   _povUp.set(0, 1, 0).applyQuaternion(boat.group.quaternion).lerp(WORLD_UP, 0.45).normalize();
   camera.position.copy(_povPos);
   camera.up.copy(_povUp);
   camera.lookAt(_povLook);
-  const targetFov = 64;
+  const targetFov = 60; // less wide-angle distortion; the Swan keeps her proportions
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-4 * dt));
   camera.updateProjectionMatrix();
 }
