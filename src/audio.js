@@ -97,10 +97,10 @@ export function buildBeds(ctx, dest) {
   bed.buffer = pinkBuf; bed.loop = true;
   const bedBp = ctx.createBiquadFilter();
   bedBp.type = 'lowpass'; bedBp.frequency.value = 480; bedBp.Q.value = 0.25;
-  const bedG = ctx.createGain(); bedG.gain.value = 0.032;
+  const bedG = ctx.createGain(); bedG.gain.value = 0;
   bed.connect(bedBp); bedBp.connect(bedG); bedG.connect(dest);
   const bedLfo = ctx.createOscillator(); bedLfo.frequency.value = 0.06;
-  const bedLfoG = ctx.createGain(); bedLfoG.gain.value = 0.008;
+  const bedLfoG = ctx.createGain(); bedLfoG.gain.value = 0;
   bedLfo.connect(bedLfoG); bedLfoG.connect(bedG.gain);
   bed.start(); bedLfo.start();
 
@@ -109,10 +109,10 @@ export function buildBeds(ctx, dest) {
   air.buffer = whiteBuf; air.loop = true;
   const airHp = ctx.createBiquadFilter();
   airHp.type = 'bandpass'; airHp.frequency.value = 1900; airHp.Q.value = 0.22;
-  const airG = ctx.createGain(); airG.gain.value = 0.007;
+  const airG = ctx.createGain(); airG.gain.value = 0;
   air.connect(airHp); airHp.connect(airG); airG.connect(dest);
   const airLfo = ctx.createOscillator(); airLfo.frequency.value = 0.13;
-  const airLfoG = ctx.createGain(); airLfoG.gain.value = 0.002;
+  const airLfoG = ctx.createGain(); airLfoG.gain.value = 0;
   airLfo.connect(airLfoG); airLfoG.connect(airG.gain);
   air.start(); airLfo.start();
 
@@ -142,7 +142,10 @@ export function buildBeds(ctx, dest) {
   whistle.connect(whHp); whHp.connect(whG); whG.connect(dest);
   // gusty flutter on the wind gain so it isn't a flat hiss
   const windLfo = ctx.createOscillator(); windLfo.frequency.value = 0.21;
-  const windLfoG = ctx.createGain(); windLfoG.gain.value = 0.004;
+  // Never modulate a gain parameter by a fixed amount: doing so made this
+  // layer audible (and negative half the time) even when setWind requested
+  // silence. Environmental gain is smoothed directly by setWind instead.
+  const windLfoG = ctx.createGain(); windLfoG.gain.value = 0;
   windLfo.connect(windLfoG); windLfoG.connect(windG.gain);
   wind.start(); whistle.start(); windLfo.start();
 
@@ -155,7 +158,9 @@ export function buildBeds(ctx, dest) {
   const shoreG = ctx.createGain(); shoreG.gain.value = 0.0;
   shore.connect(shoreBp); shoreBp.connect(shoreG); shoreG.connect(dest);
   const shoreLfo = ctx.createOscillator(); shoreLfo.frequency.value = 0.12;
-  const shoreLfoG = ctx.createGain(); shoreLfoG.gain.value = 0.22;  // slow breathing surge
+  // This used to be 0.22, added directly to shoreG.gain. It overwhelmed the
+  // whole mix with a pulsing industrial rumble, including far out at sea.
+  const shoreLfoG = ctx.createGain(); shoreLfoG.gain.value = 0;
   shoreLfo.connect(shoreLfoG); shoreLfoG.connect(shoreG.gain);
   shore.start(); shoreLfo.start();
 
@@ -174,7 +179,7 @@ export function buildBeds(ctx, dest) {
     const vg = ctx.createGain(); vg.gain.value = lvl;
     src.connect(bp); bp.connect(vg); vg.connect(leavesG);
     const lfo = ctx.createOscillator(); lfo.frequency.value = lfoHz;
-    const lfoG = ctx.createGain(); lfoG.gain.value = lvl * lfoAmt;
+    const lfoG = ctx.createGain(); lfoG.gain.value = 0;
     lfo.connect(lfoG); lfoG.connect(vg.gain);
     src.start(); lfo.start();
   }
@@ -277,7 +282,7 @@ export function createAudio() {
 
   function scheduleLap() {
     // quicker, slightly firmer laps under way; lazy and soft at rest
-    const wait = (1.25 + Math.random() * 2.2) * (1 - speedNorm * 0.22);
+    const wait = (2.6 + Math.random() * 3.8) * (1 - speedNorm * 0.15);
     lapTimer = setTimeout(() => {
       if (ctx && !muted) {
         const t = ctx.currentTime + 0.01;
@@ -285,7 +290,7 @@ export function createAudio() {
         const one = (tt, soft) => splashVoice(ctx, master, whiteBuf, tt, {
           freq: 430 + Math.random() * 650,
           q: 0.45 + Math.random() * 0.35,
-          peak: (0.12 + Math.random() * 0.14) * (0.65 + speedNorm * 0.25) * (soft ? 0.5 : 1),
+          peak: (0.035 + Math.random() * 0.045) * (0.7 + speedNorm * 0.2) * (soft ? 0.45 : 1),
           attack: 0.035 + Math.random() * 0.04,
           decay: 0.55 + Math.random() * 0.55,
           pan: side * (0.25 + Math.random() * 0.4),
@@ -338,21 +343,21 @@ export function createAudio() {
     scheduleGull();
     scheduleTone();
 
-    if (!muted) master.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 4.0);
+    if (!muted) master.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 5.0);
   }
 
   // boat speed (m/s) → livelier laps + the bow-wash rush
   function setSpeed(spd) {
     speedNorm = Math.min(Math.max(spd, 0) / 6.5, 1);
-    if (ctx && washGain) washGain.gain.setTargetAtTime(speedNorm * 0.035, ctx.currentTime, 1.8);
+    if (ctx && washGain) washGain.gain.setTargetAtTime(speedNorm * 0.012, ctx.currentTime, 2.5);
   }
 
   // apparent wind (0..1) → the rig sings; a whisper of whistle only up high
   function setWind(norm) {
     windNorm = Math.min(Math.max(norm, 0), 1);
     if (ctx && windGain) {
-      windGain.gain.setTargetAtTime(0.006 + windNorm * 0.026, ctx.currentTime, 2.5);
-      whistleGain.gain.setTargetAtTime(windNorm * windNorm * 0.0025, ctx.currentTime, 2.5);
+      windGain.gain.setTargetAtTime(windNorm * 0.007, ctx.currentTime, 3.5);
+      whistleGain.gain.setTargetAtTime(0, ctx.currentTime, 2.5);
     }
     updateLeaves();
   }
@@ -361,7 +366,7 @@ export function createAudio() {
   // a breeze — so a bare rock skerry stays quiet and a pine-clad island whispers
   function updateLeaves() {
     if (!ctx || !leavesGain) return;
-    const lvl = shoreNorm * woodedNorm * (0.25 + 0.75 * windNorm) * 0.022;
+    const lvl = shoreNorm * woodedNorm * windNorm * 0.006;
     leavesGain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.8);
   }
 
@@ -372,10 +377,10 @@ export function createAudio() {
     woodedNorm = Math.min(Math.max(o.wooded ?? 0, 0), 1);
     motorOn = !!o.motorOn; throttle = Math.min(Math.max(o.throttle ?? 0, 0), 1);
     if (!ctx) return;
-    if (shoreGain) shoreGain.gain.setTargetAtTime(shoreNorm * shoreNorm * 0.035, ctx.currentTime, 2.0);
+    if (shoreGain) shoreGain.gain.setTargetAtTime(shoreNorm * shoreNorm * 0.009, ctx.currentTime, 3.0);
     updateLeaves();
     if (engine) {
-      const lvl = motorOn ? 0.022 + throttle * 0.045 : 0;
+      const lvl = motorOn ? 0.012 + throttle * 0.026 : 0;
       engine.gain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.4);
       const rpm = 42 + throttle * 26;               // idle → cruising firing rate
       engine.osc.frequency.setTargetAtTime(rpm, ctx.currentTime, 0.5);
@@ -386,7 +391,7 @@ export function createAudio() {
   function setMuted(m) {
     muted = m;
     if (!ctx) { if (!m) start(); return; }           // first unmute also starts it
-    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.55, ctx.currentTime, muted ? 0.35 : 2.0);
+    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.3, ctx.currentTime, muted ? 0.25 : 3.0);
   }
 
   return { start, setSpeed, setWind, setEnv, setHeel, setMuted, get muted() { return muted; } };
