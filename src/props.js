@@ -704,15 +704,123 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     for (const [cx, cz, r] of CITY) if ((x - cx) ** 2 + (z - cz) ** 2 < r * r) return true;
     return false;
   };
-  // landmark churches (landmarks.js) stand on these spots — the generic NLS
-  // footprint that shares the site would draw a white box through the nave
-  const LANDMARK_SITES = [[23555, -43451], [4760, -39935]];   // Nagu kyrka, Korpo kyrka
+  // landmark churches (landmarks.js) stand on these spots — source footprints
+  // at the same site must not draw through the hand-built landmark mesh
+  const LANDMARK_SITES = [[23555, -43451], [4760, -39935], [193869, -40598], [194256, -40443], [44143, -72080]];
+  const onLandmarkSite = (x, z) => LANDMARK_SITES.some(([sx, sz]) => (x - sx) ** 2 + (z - sz) ** 2 < 70 * 70);
+  const insidePoly = (x, z, p) => {
+    let inside = false;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const [xi, zi] = p[i], [xj, zj] = p[j];
+      if (((zi > z) !== (zj > z)) && x < (xj - xi) * (z - zi) / ((zj - zi) || 1e-9) + xi) inside = !inside;
+    }
+    return inside;
+  };
+
+  // Rich OSM city override: actual polygon outlines + tagged height/use/roof/
+  // material. NLS rectangles remain the nationwide fallback, but inside this
+  // coverage the real outline owns the site, eliminating the generic block city.
+  const cityFootprints = [];
   let placed = 0;
+  for (const rec of (region.cityBuildings || [])) {
+    if (placed >= 450) break;
+    const [heightDm, kind, roof, material, p] = rec.d;
+    if (!p || p.length < 3 || onLandmarkSite(rec.cx, rec.cz)) continue;
+    const ground = heightAt(rec.cx, rec.cz);
+    if (ground < 0.05) continue;
+    let area2 = 0;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length]; area2 += a[0] * b[1] - b[0] * a[1];
+    }
+    const area = Math.abs(area2) * 0.5;
+    if (area < 8) continue;
+    const seed = mulberry32((Math.floor(rec.cx * 11 + rec.cz * 17) >>> 0) || 1);
+    const fallbackFloors = kind === 2 ? 2 : kind === 3 ? 4 : Math.max(2, Math.min(7, Math.round(2.2 + Math.sqrt(area) / 12 + seed() * 1.8)));
+    const h = heightDm ? THREE.MathUtils.clamp(heightDm / 10, 3, 80) : fallbackFloors * 3.15;
+    const baseY = Math.max(ground, 0.85) - 0.06;
+    const wallC = material === 1 ? new THREE.Color(0x9b5946)
+      : material === 4 ? new THREE.Color(0x9baeb8)
+      : kind === 2 ? new THREE.Color(0xa6a49c)
+      : kind === 3 ? new THREE.Color(0xd8d2c3)
+      : URBAN[Math.floor(seed() * URBAN.length)];
+    const roofC = roof === 4 ? new THREE.Color(0x4e5750)
+      : roof === 1 ? new THREE.Color(0x55595b)
+      : UROOFS[Math.floor(seed() * UROOFS.length)];
+    const shape = new THREE.Shape();
+    shape.moveTo(p[0][0] - rec.cx, -(p[0][1] - rec.cz));
+    for (let i = 1; i < p.length; i++) shape.lineTo(p[i][0] - rec.cx, -(p[i][1] - rec.cz));
+    shape.closePath();
+    const shell = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
+    shell.rotateX(-Math.PI / 2); shell.translate(rec.cx, baseY, rec.cz);
+    bodyGeos.push(paintGeo(shell, wallC));
+    // The majority of OSM buildings omit roof:shape. For near-rectangular
+    // footprints, infer the ridge from the longest real edge instead of making
+    // every untagged Helsinki building a flat slab. Explicit roof=flat wins.
+    const edges = p.map((a, i) => {
+      const b = p[(i + 1) % p.length], dx = b[0] - a[0], dz = b[1] - a[1];
+      return { dx, dz, len: Math.hypot(dx, dz) };
+    });
+    const longEdge = edges.reduce((a, b) => a.len > b.len ? a : b);
+    const shortEdge = edges.reduce((a, b) => a.len < b.len ? a : b);
+    const rectangular = p.length === 4 && longEdge.len / Math.max(shortEdge.len, 0.1) < 8;
+    const pitched = roof !== 1 && rectangular && (roof === 2 || roof === 3 || roof === 4 || seed() < 0.72);
+    if (pitched) {
+      const ridgeL = longEdge.len + 0.5, fullW = shortEdge.len + 0.5;
+      const roofH = roof === 4 ? Math.min(5.5, fullW * 0.38) : Math.min(4.5, Math.max(1.4, fullW * 0.3));
+      const profile = new THREE.Shape();
+      profile.moveTo(-fullW / 2, 0); profile.lineTo(fullW / 2, 0); profile.lineTo(0, roofH); profile.closePath();
+      const roofGeo = new THREE.ExtrudeGeometry(profile, { depth: ridgeL, bevelEnabled: false });
+      roofGeo.translate(0, 0, -ridgeL / 2);
+      roofGeo.rotateY(Math.atan2(longEdge.dx, longEdge.dz));
+      roofGeo.translate(rec.cx, baseY + h + 0.18, rec.cz);
+      bodyGeos.push(paintGeo(roofGeo, roofC));
+    } else {
+      const cap = new THREE.ExtrudeGeometry(shape, { depth: roof === 1 ? 0.32 : 0.62, bevelEnabled: false });
+      cap.rotateX(-Math.PI / 2); cap.translate(rec.cx, baseY + h + 0.04, rec.cz);
+      bodyGeos.push(paintGeo(cap, roofC));
+    }
+    // A light stone cornice and sparse chimneys/vents break the computer-clean
+    // top edge. Placement stays deterministic and follows the source footprint.
+    const cornice = new THREE.ExtrudeGeometry(shape, { depth: 0.22, bevelEnabled: false });
+    cornice.rotateX(-Math.PI / 2); cornice.translate(rec.cx, baseY + h - 0.08, rec.cz);
+    bodyGeos.push(paintGeo(cornice, C_TRIM));
+    if (area > 110 && kind !== 2) {
+      const nCh = area > 700 ? 3 : area > 300 ? 2 : 1;
+      for (let ch = 0; ch < nCh; ch++) {
+        const t = (ch + 1) / (nCh + 1) - 0.5;
+        const yaw = Math.atan2(longEdge.dx, longEdge.dz);
+        const chx = rec.cx + Math.sin(yaw) * longEdge.len * t * 0.62;
+        const chz = rec.cz + Math.cos(yaw) * longEdge.len * t * 0.62;
+        const chimney = new THREE.BoxGeometry(0.65, 1.5 + seed() * 0.8, 0.65);
+        chimney.translate(chx, baseY + h + 1.1, chz);
+        bodyGeos.push(paintGeo(chimney, C_CHIMNEY));
+      }
+    }
+    // Windowed facade planes follow every real polygon edge and angled street
+    // corner — no fitted rectangle survives visually.
+    const TILE = urbanFacade().N * 2.4;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length], dx = b[0] - a[0], dz = b[1] - a[1];
+      const L = Math.hypot(dx, dz); if (L < 1.2) continue;
+      let wall = urbanWall(L, h, TILE);
+      wall.rotateY(Math.atan2(-dz, dx));
+      wall.translate((a[0] + b[0]) / 2, baseY + h / 2, (a[1] + b[1]) / 2);
+      urbanGeos.push(paintGeo(wall, wallC));
+    }
+    cityFootprints.push(rec);
+    placed++;
+  }
+
   for (const [bx, bz, bw, bd, ang, cls] of (region.buildings || [])) {
     if (placed >= 450) break;
-    let onLandmark = false;
-    for (const [sx, sz] of LANDMARK_SITES) if ((bx - sx) ** 2 + (bz - sz) ** 2 < 70 * 70) { onLandmark = true; break; }
-    if (onLandmark) continue;
+    if (onLandmarkSite(bx, bz)) continue;
+    // The richer OSM polygon replaces this NLS fitted rectangle at the same site.
+    let cityTwin = false;
+    for (const cp of cityFootprints) {
+      if (bx < cp.minX - 3 || bx > cp.maxX + 3 || bz < cp.minZ - 3 || bz > cp.maxZ + 3) continue;
+      if (insidePoly(bx, bz, cp.d[4])) { cityTwin = true; break; }
+    }
+    if (cityTwin) continue;
     const ground = heightAt(bx, bz);
     // skip footprints whose ground is at or under the waterline — a footprint
     // on a submerged or awash shelf (chart offset / simplified shoreline)

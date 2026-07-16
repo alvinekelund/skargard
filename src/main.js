@@ -52,7 +52,11 @@ const coverData = await fetch(import.meta.env.BASE_URL + 'archipelago_cover.json
 // the real road network (OSM highways) — ribbons on the terrain, cars on them
 const roadsData = await fetch(import.meta.env.BASE_URL + 'archipelago_roads.json')
   .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-const archipelago = buildArchipelago(scene, env, mapData, realData, coverData, roadsData);
+// detailed OSM city polygons + levels/use/roof/material tags — richer than the
+// nationwide NLS fallback and intentionally optional while coverage expands
+const cityData = await fetch(import.meta.env.BASE_URL + 'city_buildings.json')
+  .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const archipelago = buildArchipelago(scene, env, mapData, realData, coverData, roadsData, cityData);
 const boat = createBoat(scene);
 
 // spawn in open water off Utö, bow pointed toward Jurmo, and stream that region in
@@ -64,6 +68,15 @@ const boat = createBoat(scene);
     for (let n = 0; n < 40 && archipelago.heightAt(sx, sz) > -1.2; n++) sx += 40;
     boat.state.pos.set(sx, 0, sz);
     boat.state.heading = jurmo ? Math.atan2(jurmo.x - sx, jurmo.z - sz) : Math.PI;
+  }
+  // Reproducible/shareable inspection point: ?x=193900&z=-40700&heading=2.4
+  // uses the same projected metre coordinates shown by the provenance panel.
+  // It is deliberately optional; the normal first visit still begins off Utö.
+  const q = new URLSearchParams(location.search);
+  const qx = Number(q.get('x')), qz = Number(q.get('z')), qh = Number(q.get('heading'));
+  if (Number.isFinite(qx) && Number.isFinite(qz) && q.has('x') && q.has('z')) {
+    boat.state.pos.set(qx, 0, qz);
+    if (Number.isFinite(qh) && q.has('heading')) boat.state.heading = qh;
   }
   archipelago.rebuild(boat.state.pos.x, boat.state.pos.z);
 }

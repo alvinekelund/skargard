@@ -797,7 +797,7 @@ export function inRing(x, z, r) {
   return inside;
 }
 
-export function buildArchipelago(scene, env, mapData, realData, coverData = null, roadsData = null) {
+export function buildArchipelago(scene, env, mapData, realData, coverData = null, roadsData = null, cityData = null) {
   const group = new THREE.Group();
   scene.add(group);
   const shaders = [];
@@ -1045,6 +1045,14 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // REAL OSM bridges (way[highway][bridge]) — bridges render only where they
   // actually are, no heuristic guessing (that put a phantom bridge over Utö)
   const bridgeWays = (roadsData && roadsData.bridges ? roadsData.bridges : []).map(bbxd);
+  const cityBuildings = (cityData?.buildings || []).map((b) => {
+    let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9, cx = 0, cz = 0;
+    for (const [x, z] of b[4]) {
+      minX = Math.min(minX, x); minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, z); cx += x; cz += z;
+    }
+    return { d: b, cx: cx / b[4].length, cz: cz / b[4].length, minX, minZ, maxX, maxZ };
+  });
 
   // real land cover: wood/forest (c=0), heath (1), scrub (2) — with bboxes
   const nature = (realData && realData.nature ? realData.nature : []).map((n) => {
@@ -1640,6 +1648,59 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     const pos = [], col = [], idx = [], bridges = [];
     // asphalt: dark grey with a warm-grey shoulder on minor lanes
     const cMajor = new THREE.Color(0x3b3d42), cMinor = new THREE.Color(0x47443f);
+    const emitRibbon = (run, hw, cc) => {
+      if (run.length < 2) return;
+      const base = pos.length / 3;
+      for (let i = 0; i < run.length; i++) {
+        const [x, y, z] = run[i];
+        const a = run[Math.max(i - 1, 0)], b2 = run[Math.min(i + 1, run.length - 1)];
+        let tx = b2[0] - a[0], tz = b2[2] - a[2];
+        const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
+        pos.push(x - tz * hw, y, z + tx * hw, x + tz * hw, y, z - tx * hw);
+        col.push(cc.r, cc.g, cc.b, cc.r, cc.g, cc.b);
+      }
+      for (let i = 0; i < run.length - 1; i++) {
+        const a = base + i * 2;
+        idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    };
+
+    // Validate bridge ways once, before draping roads. Their endpoint anchors
+    // are then shared by BOTH meshes, so a slightly smaller coastline polygon
+    // or DEM cell cannot erase the last 10–30 m of road before the bridge.
+    const waterBridgeWays = [], bridgeEnds = [], bridgeEndHash = new Map();
+    for (const bw of (regionBridges || [])) {
+      const pp = bw.p, a = pp[0], b = pp[pp.length - 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 16) continue;
+      let water = 0, samp = 0;
+      for (let t = 0.12; t <= 0.88; t += 0.095) {
+        samp++;
+        if (heightAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) < -0.8) water++;
+      }
+      if (water / samp < 0.45) continue;
+      const ya = Math.max(heightAt(a[0], a[1]), 0.4), yb = Math.max(heightAt(b[0], b[1]), 0.4);
+      const rec = { bw, pp, a, b, len, ya, yb };
+      waterBridgeWays.push(rec);
+      bridgeEnds.push({ x: a[0], z: a[1], y: ya + 0.2 }, { x: b[0], z: b[1], y: yb + 0.2 });
+    }
+    const endCell = (x, z) => Math.floor(x / 64) + ',' + Math.floor(z / 64);
+    for (const e of bridgeEnds) {
+      const k = endCell(e.x, e.z), bin = bridgeEndHash.get(k);
+      if (bin) bin.push(e); else bridgeEndHash.set(k, [e]);
+    }
+    const bridgeApproach = (x, z) => {
+      let best = null, bd = 48 * 48;
+      const cx = Math.floor(x / 64), cz = Math.floor(z / 64);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+        for (const e of (bridgeEndHash.get((cx + dx) + ',' + (cz + dz)) || [])) {
+          const d2 = (x - e.x) ** 2 + (z - e.z) ** 2;
+          if (d2 < bd) { bd = d2; best = e; }
+        }
+      if (!best) return null;
+      return { y: best.y, blend: 1 - Math.sqrt(bd) / 48 };
+    };
+
     for (const rd of regionRoads) {
       const hw = rd.c === 1 ? 2.8 : 1.8;
       const cc = rd.c === 1 ? cMajor : cMinor;
@@ -1660,21 +1721,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       };
       let run = [];
       const flush = () => {
-        if (run.length > 1) {
-          const base = pos.length / 3;
-          for (let i = 0; i < run.length; i++) {
-            const [x, y, z] = run[i];
-            const a = run[Math.max(i - 1, 0)], b2 = run[Math.min(i + 1, run.length - 1)];
-            let tx = b2[0] - a[0], tz = b2[2] - a[2];
-            const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
-            pos.push(x - tz * hw, y, z + tx * hw, x + tz * hw, y, z - tx * hw);
-            col.push(cc.r, cc.g, cc.b, cc.r, cc.g, cc.b);
-          }
-          for (let i = 0; i < run.length - 1; i++) {
-            const a = base + i * 2;
-            idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-          }
-        }
+        emitRibbon(run, hw, cc);
         run = [];
       };
       for (let i = 0; i < rd.p.length - 1; i++) {
@@ -1685,29 +1732,49 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const t = s2 / steps;
           const x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t;
           const y = hAt(x, z);
-          // stay continuous across low shores (was dashing wherever the shore
-          // dipped under 0.25); break only over real water, where a bridge fills it
-          if (y < -0.7) { flush(); continue; }
-          run.push([x, Math.max(y, 0.1) + 0.16, z]);
+          const approach = bridgeApproach(x, z);
+          // Away from a bridge, genuine water still breaks the road. At a real
+          // bridge endpoint, retain the approach even if the terrain polygon is
+          // a few metres short, and ease it to the exact deck elevation.
+          if (y < -0.7 && !approach) { flush(); continue; }
+          const groundY = Math.max(y, 0.1) + 0.16;
+          const roadY = approach
+            ? THREE.MathUtils.lerp(groundY, approach.y, THREE.MathUtils.smoothstep(approach.blend, 0, 1))
+            : groundY;
+          run.push([x, roadY, z]);
         }
       }
       flush();
+    }
+    // Some nationwide road-bake tiles omit the short approach way although the
+    // OSM bridge way itself is present. Never leave a deck stranded: when no
+    // baked road vertex reaches an endpoint, extend its real endpoint tangent
+    // a short distance onto land and drape that asphalt down to the terrain.
+    const roadNear = (x, z, r = 14) => regionRoads.some((rd) => {
+      if (x < rd.minX - r || x > rd.maxX + r || z < rd.minZ - r || z > rd.maxZ + r) return false;
+      return rd.p.some(([px, pz]) => (px - x) ** 2 + (pz - z) ** 2 < r * r);
+    });
+    for (const { bw, pp, ya, yb } of waterBridgeWays) {
+      const hw = bw.c === 1 ? 2.8 : 1.8, cc = bw.c === 1 ? cMajor : cMinor;
+      for (const end of [0, pp.length - 1]) {
+        const p0 = pp[end], pin = pp[end === 0 ? 1 : pp.length - 2];
+        if (roadNear(p0[0], p0[1])) continue;
+        let dx = p0[0] - pin[0], dz = p0[1] - pin[1];
+        const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+        const deckY = (end === 0 ? ya : yb) + 0.2, run = [];
+        for (let i = 4; i >= 0; i--) {
+          const t = i / 4, x = p0[0] + dx * 36 * t, z = p0[1] + dz * 36 * t;
+          const gy = Math.max(heightAt(x, z), 0.1) + 0.16;
+          run.push([x, THREE.MathUtils.lerp(deckY, gy, t), z]);
+        }
+        emitRibbon(run, hw, cc);
+      }
     }
     // bridges are the REAL OSM bridge ways — BUT only where the span actually
     // crosses WATER. Countless OSM bridge=yes ways are overpasses / embankments
     // / culverts over dry land; those get no arch (that was the "bridge in a
     // field" bug). Sample the span; build only if its middle is over water.
-    for (const bw of (regionBridges || [])) {
-      const pp = bw.p, a = pp[0], b = pp[pp.length - 1];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (len < 16) continue;                     // skip culverts / tiny overpasses
-      let water = 0, samp = 0;
-      for (let t = 0.12; t <= 0.88; t += 0.095) {
-        samp++;
-        if (heightAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) < -0.8) water++;
-      }
-      if (water / samp < 0.45) continue;          // mostly over land → not a water bridge
-      const ya = Math.max(heightAt(a[0], a[1]), 0.4), yb = Math.max(heightAt(b[0], b[1]), 0.4);
+    for (const { bw, pp, a, b, len, ya, yb } of waterBridgeWays) {
       // long city bridges (Hakaniemi, Kulosaari, Lauttasaari…) follow their real
       // polyline, drawn as a chain of near-flat spans — a single first→last
       // chord arched 20 m high read as black cables floating over the rooftops
@@ -1993,6 +2060,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
     const region = {
       buildings: (realData?.buildings || []).filter((b) => inBox(b[0], b[1])),
+      cityBuildings: cityBuildings
+        .filter((b) => b.maxX > cx0 - RB && b.minX < cx0 + RB && b.maxZ > cz0 - RB && b.minZ < cz0 + RB)
+        .sort((a, b) => (a.cx - cx0) ** 2 + (a.cz - cz0) ** 2 - (b.cx - cx0) ** 2 - (b.cz - cz0) ** 2)
+        .slice(0, 520),
       piers: (realData?.piers || []).filter((pl) => inBox(pl[0][0], pl[0][1])),
       seamarks: (realData?.seamarks || []).filter((m) => inBox(m[0], m[1])),
       roads: regionRoads,
