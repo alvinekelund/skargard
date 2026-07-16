@@ -253,23 +253,23 @@ export function createAudio() {
     return { gain: g, osc, sub };
   }
 
-  // A rare musical glint: one note from a D-major pentatonic set, almost more
-  // reflection than melody. Long attacks and pure sine partials keep it warm,
-  // spacious and non-directive — never a loop, beat or ominous drone.
+  // A rare musical glint, almost below conscious attention. Keeping this to a
+  // single low sine avoids the synthetic chime/notification quality that the
+  // former bright two-part tones acquired over headphones.
   function softTone(t) {
-    const notes = [293.66, 329.63, 369.99, 440.0, 493.88];
+    const notes = [146.83, 164.81, 185.0, 220.0];
     const f = notes[Math.floor(Math.random() * notes.length)];
-    for (const [mult, level] of [[1, 0.006], [2, 0.0015]]) {
+    for (const [mult, level] of [[1, 0.0018]]) {
       const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = f * mult;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(level, t + 1.8);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 7.5);
+      g.gain.exponentialRampToValueAtTime(level, t + 3.5);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 12.0);
       const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
       osc.connect(g);
       if (pan) { pan.pan.value = (Math.random() - 0.5) * 0.7; g.connect(pan); pan.connect(master); }
       else g.connect(master);
-      osc.start(t); osc.stop(t + 7.7);
+      osc.start(t); osc.stop(t + 12.2);
     }
   }
 
@@ -277,7 +277,7 @@ export function createAudio() {
     toneTimer = setTimeout(() => {
       if (ctx && !muted) softTone(ctx.currentTime + 0.05);
       scheduleTone();
-    }, (22 + Math.random() * 28) * 1000);
+    }, (75 + Math.random() * 90) * 1000);
   }
 
   function scheduleLap() {
@@ -290,7 +290,7 @@ export function createAudio() {
         const one = (tt, soft) => splashVoice(ctx, master, whiteBuf, tt, {
           freq: 430 + Math.random() * 650,
           q: 0.45 + Math.random() * 0.35,
-          peak: (0.035 + Math.random() * 0.045) * (0.7 + speedNorm * 0.2) * (soft ? 0.45 : 1),
+          peak: (0.012 + Math.random() * 0.016) * (0.65 + speedNorm * 0.18) * (soft ? 0.4 : 1),
           attack: 0.035 + Math.random() * 0.04,
           decay: 0.55 + Math.random() * 0.55,
           pan: side * (0.25 + Math.random() * 0.4),
@@ -343,7 +343,7 @@ export function createAudio() {
     scheduleGull();
     scheduleTone();
 
-    if (!muted) master.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 5.0);
+    if (!muted) master.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 6.0);
   }
 
   // boat speed (m/s) → livelier laps + the bow-wash rush
@@ -391,7 +391,7 @@ export function createAudio() {
   function setMuted(m) {
     muted = m;
     if (!ctx) { if (!m) start(); return; }           // first unmute also starts it
-    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.3, ctx.currentTime, muted ? 0.25 : 3.0);
+    if (master) master.gain.setTargetAtTime(muted ? 0 : 0.12, ctx.currentTime, muted ? 0.25 : 3.5);
   }
 
   return { start, setSpeed, setWind, setEnv, setHeel, setMuted, get muted() { return muted; } };

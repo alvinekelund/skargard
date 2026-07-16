@@ -96,15 +96,37 @@ function sparBuoy(green) {
   return g;
 }
 
+// Small-craft hull shared by skiffs, runabouts and harbour yachts. The old
+// CapsuleGeometry made every vessel a rounded toy. This is an actual waterline
+// plan: fine bow, full midships and a transom (or a double-ended stern), with
+// visible draft below the waterline. Bow points +Z.
+function smallCraftHull(L, B, freeboard, mat, doubleEnded = false) {
+  const hb = B * 0.5, bow = L * 0.5, stern = -L * 0.5;
+  const s = new THREE.Shape();
+  s.moveTo(0, bow);
+  s.quadraticCurveTo(hb, bow - L * 0.24, hb, L * 0.02);
+  if (doubleEnded) {
+    s.quadraticCurveTo(hb * 0.75, stern + L * 0.2, 0, stern);
+    s.quadraticCurveTo(-hb * 0.75, stern + L * 0.2, -hb, L * 0.02);
+  } else {
+    s.quadraticCurveTo(hb, stern + L * 0.12, hb * 0.72, stern);
+    s.lineTo(-hb * 0.72, stern);
+    s.quadraticCurveTo(-hb, stern + L * 0.12, -hb, L * 0.02);
+  }
+  s.quadraticCurveTo(-hb, bow - L * 0.24, 0, bow);
+  const geo = new THREE.ExtrudeGeometry(s, { depth: freeboard + 0.45, bevelEnabled: false });
+  geo.rotateX(-Math.PI / 2);
+  const hull = new THREE.Mesh(geo, mat);
+  hull.position.y = -0.43;
+  return hull;
+}
+
 // a wooden skiff (~3.5 m): shaped hull, dark interior well, two thwarts,
 // gunwale rails — not just a floating capsule. bow at +Z.
 function rowboat(rng) {
   const g = new THREE.Group();
   const hullMat = rng() < 0.5 ? M.hullWhite : M.falunRed;
-  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 2.4, 4, 9), hullMat);
-  hull.rotation.x = Math.PI / 2;
-  hull.scale.set(0.82, 1, 0.55);                // beam, length, draft
-  hull.position.y = 0.2; g.add(hull);
+  g.add(smallCraftHull(3.8, 1.35, 0.62, hullMat, true));
   const well = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.16, 1.9), M.woodDark);
   well.position.y = 0.3; g.add(well);           // open interior
   for (const tz of [0.55, -0.45]) {             // rowing thwarts
@@ -123,10 +145,7 @@ function rowboat(rng) {
 function motorboat(rng) {
   const g = new THREE.Group();
   const hullMat = [M.hullWhite, M.falunRed, M.white, M.navy][Math.floor(rng() * 4)];
-  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.72, 3.4, 4, 9), hullMat);
-  hull.scale.set(1, 0.62, 0.5);          // (width, length, draft) after the tip below
-  hull.rotation.x = Math.PI / 2;         // long axis → +Z
-  hull.position.y = 0.32; g.add(hull);
+  g.add(smallCraftHull(5.2, 1.95, 0.85, hullMat));
   const well = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.34, 2.0), M.woodDark);
   well.position.set(0, 0.5, -0.3); g.add(well);                    // dark cockpit
   const cons = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.5, 0.65), M.white);
@@ -224,9 +243,7 @@ function smallSailboat(rng) {
   // varnished wooden classic, pale grey
   const hullMat = [M.hullWhite, M.white, M.navy, M.falunRed, M.wood, M.greyWall,
     new THREE.MeshStandardMaterial({ color: 0x27503f, roughness: 0.5 })][Math.floor(rng() * 7)];
-  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.62, 4.4, 4, 9), hullMat);
-  hull.scale.set(1, 0.72, 0.42);
-  hull.rotation.x = Math.PI / 2; hull.position.y = 0.34; g.add(hull);
+  g.add(smallCraftHull(6.2, 2.05, 0.9, hullMat));
   const deck = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.06, 3.6), M.wood);
   deck.position.set(0, 0.55, -0.2); g.add(deck);
   // low trunk with a rounded top face and dark window strips
@@ -527,9 +544,12 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
       }
     }
     // berthed boats lying alongside the finger — it's July, the harbour is full
-    const nB = Math.floor(len / 5.5);
-    for (let k = 1; k <= nB; k++) {
-      const along = k * 5.5 - 2;
+    // Berth pitch must reflect the 8–13 m cruisers below. The previous 5.5 m
+    // pitch physically overlapped neighbouring hulls and made them read as a
+    // pile of toys. One 9.5 m slot per side leaves believable bow/stern room.
+    const nB = Math.max(1, Math.floor((len - 3) / 9.5));
+    for (let k = 0; k < nB; k++) {
+      const along = 4.5 + k * 9.5;
       for (const s of [1, -1]) {
         if (rng() < 0.16) continue;                       // a few open slips
         const side = s * (3.0 + rng() * 0.7);
@@ -592,6 +612,7 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
 
 export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
   const group = new THREE.Group();
+  group.name = 'props';
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
 
   // dense regions (inner Nauvo) hold THOUSANDS of features against render caps
@@ -1213,6 +1234,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   let moored = 0;
   for (const line of (region.piers || [])) {
     if (moored >= 140) break;
+    // The authored guest-harbour basin above already owns its berths. A second
+    // random population on the source pier doubled boats and made the harbour
+    // look procedurally cluttered.
+    const lx0 = line[0][0], lz0 = line[0][1];
+    if (HARBORS.some((H) => (lx0 - H.wx) ** 2 + (lz0 - H.wz) ** 2 < 280 * 280)) continue;
     if (!line.some(([px2, pz2]) => heightAt(px2, pz2) > -1.6)) continue;   // same land test
     let best = null, bd = 0;                       // seaward pier end = deepest water
     for (const [px, pz] of line) { const d = -heightAt(px, pz); if (d > bd) { bd = d; best = [px, pz]; } }
@@ -1221,9 +1247,22 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     let dx = px - line[0][0], dz = pz - line[0][1];
     const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;   // outward along the pier
     const rx = dz, rz = -dx;                               // abeam the pier
-    const nBoats = 4 + Math.floor(rng() * 4);             // 4–7 berthed — it's July out here
+    // Marina density comes from the source geometry itself: several nearby
+    // piers indicate a berth field; a lone cottage jetty gets at most a skiff
+    // or runabout. Boat count is also bounded by actual usable pier length.
+    let nearbyPiers = 0;
+    for (const other of (region.piers || [])) {
+      if (other === line) continue;
+      const [ox, oz] = other[0];
+      if ((ox - lx0) ** 2 + (oz - lz0) ** 2 < 140 * 140) nearbyPiers++;
+    }
+    const marina = nearbyPiers >= 2;
+    const capacity = Math.max(0, Math.min(10, Math.floor(L / 5.8) * 2));
+    const nBoats = marina ? Math.min(capacity, 3 + nearbyPiers + Math.floor(rng() * 3))
+      : (L > 10 && rng() < 0.68 ? 1 + (L > 24 && rng() < 0.35 ? 1 : 0) : 0);
     for (let k = 0; k < nBoats && moored < 140; k++) {
-      const along = 3 + k * 5.5, side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
+      const slot = Math.floor(k / 2), along = Math.min(L - 2.5, 3 + slot * 5.8);
+      const side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
       const r = rng();

@@ -21,12 +21,15 @@ export const PRESETS = {
     // rayleigh 4.4 deepens the horizon rose AND the blue aloft; turbidity 4.2 gives
     // the warm mie glow-cone without whole-sky milk; g .87 keeps the halo tight.
     sunElev: 2.0, sunAz: 162, turbidity: 4.2, rayleigh: 4.4, mie: 0.0045, g: 0.87, exposure: 0.42,
-    sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x6c7fd8, hemiGround: 0x2e2a3e, hemiInt: 0.3,
+    // A low sun is directional, but the real Baltic sky remains a huge blue/
+    // rose fill source. Stronger hemispheric fill preserves trunks, walls and
+    // shaded shore rock instead of reducing them to detached black cut-outs.
+    sunColor: 0xffa64d, sunInt: 3.2, hemiSky: 0x8292d6, hemiGround: 0x403846, hemiInt: 0.48,
     // fog is the AVERAGE horizon tone, not the sun-side flame: a saturated
     // orange (0xe08055 @ 0.0007) turned every island beyond ~4 km into one
     // uniform orange stripe. A muted rose-tan, thinner, lets the distant belt
     // keep silhouette steps and tonal variety — the layered-headlands look.
-    ambient: 0x4a3a66, ambientInt: 0.14, fog: 0xcf9078, fogDensity: 0.00045,
+    ambient: 0x625b82, ambientInt: 0.22, fog: 0xcf9078, fogDensity: 0.00045,
     waterColor: 0x1c333a, sunWater: 0xffa050, distortion: 2.6, waterSize: 3.2,
     // dusk clouds: a touch smaller and thinner than before — at [1800,3600] ×
     // 0.78 a backlit wisp overhead could weigh on half the sky; still present,

@@ -1737,7 +1737,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           // bridge endpoint, retain the approach even if the terrain polygon is
           // a few metres short, and ease it to the exact deck elevation.
           if (y < -0.7 && !approach) { flush(); continue; }
-          const groundY = Math.max(y, 0.1) + 0.16;
+          // Inland hill roads seen edge-on from the water became long black
+          // horizon strokes whenever the very large mainland terrain tile was
+          // coarser than the elevation samples. Coastal roads and every bridge
+          // remain; suppress only elevated inland ribbon runs that should be
+          // hidden by terrain and forest in a seaborne view.
+          if (y > 8 && !approach) { flush(); continue; }
+          const groundY = Math.max(y, 0.1) + 0.035;
           const roadY = approach
             ? THREE.MathUtils.lerp(groundY, approach.y, THREE.MathUtils.smoothstep(approach.blend, 0, 1))
             : groundY;
@@ -1764,7 +1770,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         const deckY = (end === 0 ? ya : yb) + 0.2, run = [];
         for (let i = 4; i >= 0; i--) {
           const t = i / 4, x = p0[0] + dx * 36 * t, z = p0[1] + dz * 36 * t;
-          const gy = Math.max(heightAt(x, z), 0.1) + 0.16;
+          const gy = Math.max(heightAt(x, z), 0.1) + 0.035;
           run.push([x, THREE.MathUtils.lerp(deckY, gy, t), z]);
         }
         emitRibbon(run, hw, cc);
@@ -1793,6 +1799,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       bridges.push({ a: [a[0], ya, a[1]], b: [b[0], yb, b[1]], hw: bw.c === 1 ? 2.8 : 1.8 });
     }
     const grp = new THREE.Group();
+    grp.name = 'roads';
     if (idx.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -1890,7 +1897,6 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   }
   const roadMat = new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 0.93, metalness: 0,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   roadMat.__shared = true;
 
@@ -1983,10 +1989,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       .slice(0, 90);
 
     job = { set, i: 0, cx0, cz0, t0: performance.now(), regionRoads, regionBridges };
-    stepRebuild(40);                      // a generous first slice: teleports feel instant
+    // Front-load enough terrain to avoid twenty seconds of empty sea on dense
+    // mainland regions. A short loading hitch is much less confusing than a
+    // responsive helm with the destination apparently missing.
+    stepRebuild(180);
   }
 
-  function stepRebuild(budgetMs = 7) {
+  function stepRebuild(budgetMs = 90) {
     if (!job) return;
     const tS = performance.now();
     while (job.i < job.set.length && performance.now() - tS < budgetMs) {
@@ -2177,6 +2186,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   return {
     group, update, islands, heightAt, woodedAt, islandHeight, rebuild, rebuildSync, setDebug, toggleSatellite,
+    get activeGroup() { return activeGroup; },
     get debugOn() { return debugOn; },
     get debugInfo() { return lastCounts; },
     get satOn() { return satOn; },
