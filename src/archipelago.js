@@ -1686,12 +1686,17 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // (the chart draws some islands smaller than the road network knows them).
   function buildRoadMesh(regionRoads, regionBridges) {
     const pos = [], col = [], idx = [], bridges = [];
+    const quayFurniture = new THREE.Group(), quayCells = new Set();
+    let quayPieces = 0;
     // Asphalt plus a pale granite/concrete pedestrian edge in actual city
     // cores. Previously Helsinki inherited the exact same isolated dark ribbon
     // as a gravel lane on an outer island, so even correct OSM geometry did not
     // read as a street network.
     const cMajor = new THREE.Color(0x3b3d42), cMinor = new THREE.Color(0x47443f);
     const cWalk = new THREE.Color(0x9d9a90), cLine = new THREE.Color(0xd8d5c8);
+    const cQuay = new THREE.Color(0xaaa79e), cQuayFace = new THREE.Color(0x77766f);
+    const quaySteel = new THREE.MeshStandardMaterial({ color: 0x4d5355, roughness: 0.55, metalness: 0.35 });
+    const quayLamp = new THREE.MeshStandardMaterial({ color: 0xffe7b2, emissive: 0xffc66d, emissiveIntensity: 1.2 });
     const cityAt = (x, z) => CITY_QUAYS.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 < r * r);
     const emitRibbon = (run, hw, cc, yOff = 0) => {
       if (run.length < 2) return;
@@ -1707,6 +1712,45 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       for (let i = 0; i < run.length - 1; i++) {
         const a = base + i * 2;
         idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    };
+    const emitQuay = (run, roadHalfWidth) => {
+      if (run.length < 2 || quayPieces > 180) return;
+      for (let i = 0; i < run.length - 1 && quayPieces <= 180; i++) {
+        const a = run[i], b = run[i + 1], tx0 = b[0] - a[0], tz0 = b[2] - a[2];
+        const L = Math.hypot(tx0, tz0); if (L < 3) continue;
+        const tx = tx0 / L, tz = tz0 / L, px = -tz, pz = tx;
+        const mx = (a[0] + b[0]) / 2, mz = (a[2] + b[2]) / 2;
+        if (!cityAt(mx, mz)) continue;
+        const probe = roadHalfWidth + 7;
+        const hl = heightAt(mx + px * probe, mz + pz * probe);
+        const hr = heightAt(mx - px * probe, mz - pz * probe);
+        if ((hl < -0.25) === (hr < -0.25)) continue;          // coast on exactly one side
+        const side = hl < hr ? 1 : -1, inner = roadHalfWidth + 2.7, outer = roadHalfWidth + 5.2;
+        const shifted = [a, b].map((v) => [v[0] + px * side * (inner + outer) / 2, v[1] + 0.018, v[2] + pz * side * (inner + outer) / 2]);
+        emitRibbon(shifted, (outer - inner) / 2, cQuay, 0.01);
+        const topA = [a[0] + px * side * outer, a[1] + 0.02, a[2] + pz * side * outer];
+        const topB = [b[0] + px * side * outer, b[1] + 0.02, b[2] + pz * side * outer];
+        const base = pos.length / 3;
+        pos.push(...topA, ...topB, topA[0], -1.25, topA[2], topB[0], -1.25, topB[2]);
+        for (let k = 0; k < 4; k++) col.push(cQuayFace.r, cQuayFace.g, cQuayFace.b);
+        idx.push(base, base + 2, base + 1, base + 1, base + 2, base + 3,
+          base + 1, base + 2, base, base + 3, base + 2, base + 1);
+        quayPieces++;
+
+        const key = Math.floor(mx / 34) + ',' + Math.floor(mz / 34);
+        if (quayCells.has(key)) continue;
+        quayCells.add(key);
+        const fx = mx + px * side * (outer - 0.45), fz = mz + pz * side * (outer - 0.45);
+        const bollard = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.55, 8), quaySteel);
+        bollard.position.set(fx, (a[1] + b[1]) / 2 + 0.29, fz); quayFurniture.add(bollard);
+        if (quayCells.size % 2 === 0 && quayCells.size < 80) {
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.065, 4.5, 6), quaySteel);
+          pole.position.set(fx - px * side * 1.25, (a[1] + b[1]) / 2 + 2.25, fz - pz * side * 1.25);
+          const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), quayLamp);
+          lamp.position.set(pole.position.x, pole.position.y + 2.32, pole.position.z);
+          quayFurniture.add(pole, lamp);
+        }
       }
     };
 
@@ -1766,8 +1810,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       };
       let run = [];
       const flush = () => {
-        if (run.length > 1 && cityAt(run[Math.floor(run.length / 2)][0], run[Math.floor(run.length / 2)][2])) {
+        const urbanRun = run.length > 1 && cityAt(run[Math.floor(run.length / 2)][0], run[Math.floor(run.length / 2)][2]);
+        if (urbanRun) {
           emitRibbon(run, hw + (rd.c === 1 ? 2.2 : 1.45), cWalk, -0.018);
+          emitQuay(run, hw + (rd.c === 1 ? 2.2 : 1.45));
         }
         emitRibbon(run, hw, cc);
         // A restrained centre marking gives major urban approaches their true
@@ -1874,6 +1920,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
     const bmesh = buildBridges(bridges);
     if (bmesh) grp.add(bmesh);
+    if (quayFurniture.children.length) grp.add(quayFurniture);
     return grp.children.length ? grp : null;
   }
 
