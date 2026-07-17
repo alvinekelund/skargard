@@ -762,7 +762,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const fallbackFloors = kind === 2 ? 2 : kind === 3 ? 4
       : Math.max(2, Math.min(7, Math.round(2.6 + Math.sqrt(area) / 28 + seed() * 3.4)));
     const h = heightDm ? THREE.MathUtils.clamp(heightDm / 10, 3, 80) : fallbackFloors * 3.15;
-    const baseY = Math.max(ground, 0.85) - 0.06;
+    const baseY = Math.max(ground, inCity(rec.cx, rec.cz) ? 1.18 : 0.85) - 0.06;
     const wallC = material === 1 ? new THREE.Color(0x9b5946)
       : material === 4 ? new THREE.Color(0x9baeb8)
       : kind === 2 ? new THREE.Color(0xa6a49c)
@@ -875,7 +875,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
     // a shore building stands on a stone footing well proud of the sea — with
     // the floor at wave height, every low-shelf shoreline row read as flooded
-    const baseY = Math.max(ground, 0.85) - 0.06;
+    const baseY = Math.max(ground, inCity(bx, bz) ? 1.18 : 0.85) - 0.06;
     const found = Math.max(0, baseY - Math.max(ground, -0.6)) + 0.3;   // footing reaches the real ground
 
     // ── URBAN BLOCKS: real city footprints (Helsinki, Turku, Porvoo, Hanko,

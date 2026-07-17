@@ -320,7 +320,7 @@ function scotsPineGeometry(rng, { trunkH = 2.8, spread = 1.0, flat = 0.66 } = {}
     // Open and wind-shaped, but still a volume of needles—not a stack of flat
     // parasols. The anisotropy makes branch direction visible while the fuller
     // vertical axis keeps the crown natural from a low boat viewpoint.
-    s.scale(1.35 * spread, flat * 0.92, 0.9 * spread);
+    s.scale(1.12 * spread, flat, 0.78 * spread);
     s.rotateY(rot + (rng() - 0.5) * 0.35);
     s.translate(x * spread + (rng() - 0.5) * 0.12, y + dy, z * spread + (rng() - 0.5) * 0.12);
     parts.push(paint(s, COL.scots.clone().lerp(COL.scotsDk, 0.2 + rng() * 0.45)
@@ -1074,6 +1074,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // REAL OSM bridges (way[highway][bridge]) — bridges render only where they
   // actually are, no heuristic guessing (that put a phantom bridge over Utö)
   const bridgeWays = (roadsData && roadsData.bridges ? roadsData.bridges : []).map(bbxd);
+  const bboxDistance2 = (r, x, z) => {
+    const dx = Math.max(r.minX - x, x - r.maxX, 0);
+    const dz = Math.max(r.minZ - z, z - r.maxZ, 0);
+    return dx * dx + dz * dz;
+  };
   const cityBuildings = (cityData?.buildings || []).map((b) => {
     let minX = 1e9, minZ = 1e9, maxX = -1e9, maxZ = -1e9, cx = 0, cz = 0;
     for (const [x, z] of b[4]) {
@@ -1105,8 +1110,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     let tp = performance.now();
     const M = 14;                                     // underwater apron margin
     const w = bbox.maxX - bbox.minX + M * 2, d = bbox.maxZ - bbox.minZ + M * 2;
-    const segX = THREE.MathUtils.clamp(Math.round(w * 0.5), 8, 140);
-    const segZ = THREE.MathUtils.clamp(Math.round(d * 0.5), 8, 140);
+    const terrainCap = (isl._detail ?? 1) < 0.5 ? 42 : 140;
+    const segX = THREE.MathUtils.clamp(Math.round(w * 0.5), 8, terrainCap);
+    const segZ = THREE.MathUtils.clamp(Math.round(d * 0.5), 8, terrainCap);
     const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const ox = (bbox.minX + bbox.maxX) / 2, oz = (bbox.minZ + bbox.maxZ) / 2;
@@ -1256,7 +1262,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       // base bonus scales with area: a flat constant times 50 skerries used
       // to drain the whole region budget before the main island's turn
       const base = satGrid || hasWood ? Math.min(Math.ceil(isl.A * 0.02), 440) : 0;
-      const target = Math.min(Math.floor(isl.A * (satGrid ? 0.022 : 0.015)) + base, 5200, treeBudget);
+      const detail = isl._detail ?? 1;
+      const target = Math.min(Math.floor((Math.floor(isl.A * (satGrid ? 0.022 : 0.015)) + base) * detail), 5200, treeBudget);
       treeBudget -= target;
       let placed = 0, tries = 0;
       while (placed < target && tries < target * 8) {
@@ -1291,7 +1298,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         // on sheltered islands, still real 9–20 m trees on the small ones (you
         // canNOT see over a wooded skerry from a boat), only the outermost
         // exposed rocks stay wind-stunted. A pine must tower over a house.
-        const maturity = isl.A > 600000 ? 3.2 : isl.A > 120000 ? 2.9 : isl.A > 20000 ? 2.5 : 2.0;
+        const maturity = isl.A > 600000 ? 2.9 : isl.A > 120000 ? 2.65 : isl.A > 20000 ? 2.35 : 1.9;
         // A passing sample seeds a tight STAND, not a lone spire. Uniform scatter
         // reads as an evenly-combed row with daylight through every gap — the
         // dead giveaway. Real forest is clumped groves with rock clearings
@@ -1323,7 +1330,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           const isBirch = treeRng() < pBirch;    // conifer dominant, birch the accent
           const isScots = !isBirch && (treeRng() < 0.8 ? standScots : !standScots);
           const vig = ci === 0 ? 1.0 : 0.68 + treeRng() * 0.32;
-          const sc = ((isBirch ? 1.0 : 1.1) + treeRng() * (isBirch ? 0.8 : 1.3)) * maturity * vig;
+          const sc = ((isBirch ? 0.92 : 1.0) + treeRng() * (isBirch ? 0.55 : 0.72)) * maturity * vig;
           _p.set(wx, ty - 0.2, wz);
           // spruce is a slender spire (tall > wide); Scots pine carries a broader,
           // open crown, so it stays wider and reads as a different tree
@@ -1350,7 +1357,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
     // low juniper + heather scrub — the heath that carpets these islands.
     // With a satellite grid: juniper keeps off the photo's forests and fields.
-    const jtarget = Math.min(Math.floor(isl.A * (kind === 'bald' ? 0.011 : kind === 'sparse' ? 0.02 : 0.008)), 240);
+    const jtarget = Math.min(Math.floor(isl.A * (kind === 'bald' ? 0.011 : kind === 'sparse' ? 0.02 : 0.008) * (isl._detail ?? 1)), 240);
     let jp = 0, jt = 0;
     while (jp < jtarget && jt < jtarget * 8) {
       jt++;
@@ -1785,8 +1792,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           // coarser than the elevation samples. Coastal roads and every bridge
           // remain; suppress only elevated inland ribbon runs that should be
           // hidden by terrain and forest in a seaborne view.
-          if (y > 8 && !approach) { flush(); continue; }
-          const groundY = Math.max(y, 0.1) + 0.035;
+          if (y > 8 && !approach && (x - activeCenter.x) ** 2 + (z - activeCenter.y) ** 2 > 1500 ** 2) {
+            flush(); continue;
+          }
+          // Urban streets and quays sit well above mean sea level. Keeping a
+          // mathematically valid road at +0.13 m made the wave surface hide the
+          // entire Helsinki network, so buildings appeared to rise straight
+          // from water even though their OSM streets existed. Lift the shared
+          // street/pavement datum in real city cores; rural lanes still drape
+          // tightly over their measured island terrain.
+          const groundY = Math.max(y, cityAt(x, z) ? 1.22 : 0.1) + 0.035;
           const roadY = approach
             ? THREE.MathUtils.lerp(groundY, approach.y, THREE.MathUtils.smoothstep(approach.blend, 0, 1))
             : groundY;
@@ -1977,7 +1992,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     perf.mesh = perf.color = perf.scatter = 0;
     geoParts = []; pineMats = [[], [], []]; scotsMats = [[], [], []]; birchMats = [[], [], []];
     juniperMats = []; keloMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
-    treeBudget = 23000;                   // region-wide cap: near islands (sorted first) win
+    treeBudget = 15000;                   // close forest remains dense; distant stands use geometric LOD
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
     if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
@@ -2004,6 +2019,11 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     };
     set.sort((a, b) => edge2(a) - edge2(b));
     if (set.length > MAX_ISLANDS) set = set.slice(0, MAX_ISLANDS);
+    // Keep every real island outline in range, but reserve full vegetation and
+    // prop density for the inner 1.8 km. At three kilometres individual trees
+    // are below a pixel; generating tens of thousands of them delayed first
+    // land by 20+ seconds without adding visible geographic information.
+    for (const i of set) i._detail = edge2(i) < 1800 ** 2 ? 1 : 0.22;
 
     for (const isl of set) {
       // real land cover intersecting this island (world-coord polygons w/ bbox)
@@ -2019,17 +2039,24 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
     // roads intersecting the region — needed BEFORE island scatter so trees
     // keep off the carriageways. Nearest-first, capped, like everything else.
+    // Preserve the complete local street fabric. The old midpoint-sorted cap
+    // discarded most Helsinki streets (and sometimes the way adjoining a
+    // bridge) because a long way's midpoint can be kilometres away even when
+    // the geometry passes beside the camera. Keep every way touching the inner
+    // 1.8 km, then the major network farther out for a coherent skyline-scale
+    // city. Distance is measured to the way bbox, never its midpoint.
     const regionRoads = roads
       .filter((r) => r.maxX > cx0 - RBUILD && r.minX < cx0 + RBUILD && r.maxZ > cz0 - RBUILD && r.minZ < cz0 + RBUILD)
-      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
-                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
-      .slice(0, 260);
+      .map((r) => ({ r, d2: bboxDistance2(r, cx0, cz0) }))
+      .filter(({ r, d2 }) => d2 < 1800 ** 2 || r.c === 1)
+      .sort((a, b) => a.d2 - b.d2 || b.r.c - a.r.c)
+      .slice(0, 900)
+      .map(({ r }) => r);
     hashRoads(regionRoads);
     const regionBridges = bridgeWays
       .filter((r) => r.maxX > cx0 - RBUILD && r.minX < cx0 + RBUILD && r.maxZ > cz0 - RBUILD && r.minZ < cz0 + RBUILD)
-      .sort((a, b) => (((a.minX + a.maxX) / 2 - cx0) ** 2 + ((a.minZ + a.maxZ) / 2 - cz0) ** 2)
-                    - (((b.minX + b.maxX) / 2 - cx0) ** 2 + ((b.minZ + b.maxZ) / 2 - cz0) ** 2))
-      .slice(0, 90);
+      .sort((a, b) => bboxDistance2(a, cx0, cz0) - bboxDistance2(b, cx0, cz0))
+      .slice(0, 220);
 
     job = { set, i: 0, cx0, cz0, t0: performance.now(), regionRoads, regionBridges };
     // Front-load enough terrain to avoid twenty seconds of empty sea on dense
