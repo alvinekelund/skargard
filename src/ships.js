@@ -340,6 +340,72 @@ function connectionVessel() {
   return g;
 }
 
+// Finnish road-ferry slip generated from a route endpoint. The route tangent
+// supplies the exact shore-normal, while terrain samples behind the endpoint
+// establish the land datum. This makes every car-ferry route physically join
+// its road network instead of ending at an arbitrary point in open water.
+function roadFerryTerminal(endpoint, waterPoint, heightAt) {
+  const g = new THREE.Group();
+  const ex = endpoint[0], ez = endpoint[1];
+  const dx0 = waterPoint[0] - ex, dz0 = waterPoint[1] - ez;
+  const dl = Math.hypot(dx0, dz0) || 1, dx = dx0 / dl, dz = dz0 / dl;
+  const sample = (back) => heightAt ? heightAt(ex - dx * back, ez - dz * back) : 0.8;
+  const ground = Math.max(0.75, sample(10), sample(20), sample(32));
+  const concrete = new THREE.MeshStandardMaterial({ color: 0x9b9990, roughness: 0.92 });
+  const asphalt = new THREE.MeshStandardMaterial({ color: 0x3f4142, roughness: 0.95 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x7e8587, roughness: 0.52, metalness: 0.48 });
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b719, roughness: 0.62 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe8e5d9, roughness: 0.72 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x24272a, roughness: 0.8 });
+
+  // +Z points from land into the ferry lane. A broad approach and concrete
+  // apron bridge the visual gap between the retained OSM road and the slip.
+  // Its foundation reaches mean sea level: OSM road and generalized coastline
+  // can differ by a few metres, but a real ferry approach is an engineered
+  // causeway, never a thin asphalt card floating beyond the island mesh.
+  g.add(box(8.4, ground + 0.18, 36, 0, ground * 0.5 - 0.09, -27, concrete));
+  g.add(box(7.2, 0.18, 42, 0, ground, -25, asphalt));
+  g.add(box(14, 0.32, 21, 0, ground - 0.07, -9.5, concrete));
+  for (const x of [-2.2, 2.2]) g.add(box(0.12, 0.04, 30, x, ground + 0.13, -25, white));
+
+  // Hinged steel shore ramp: land end follows terrain, water end meets the
+  // vehicle deck close to +0.55 m. Explicit vertices give a real slope rather
+  // than a flat asphalt rectangle floating across the shoreline.
+  const rp = new Float32Array([
+    -5.1, ground + 0.12, -9,  5.1, ground + 0.12, -9,
+    -5.1, 0.58, 4.5,          5.1, 0.58, 4.5,
+  ]);
+  const rg = new THREE.BufferGeometry();
+  rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+  rg.setIndex([0, 2, 1, 1, 2, 3]); rg.computeVertexNormals();
+  g.add(new THREE.Mesh(rg, steel));
+  for (const x of [-5.35, 5.35]) g.add(box(0.34, 0.55, 15, x, ground * 0.5 + 0.45, -2.2, yellow));
+
+  // Waiting barrier, operator booth, terminal lamps and the characteristic
+  // yellow/black fender dolphins that frame a Finferries landing.
+  g.add(box(3.8, 0.12, 0.12, -1.9, ground + 1.05, -15, yellow));
+  g.add(box(0.18, 2.0, 0.18, -3.8, ground + 0.9, -15, steel));
+  g.add(box(3.1, 2.4, 2.8, 6.7, ground + 1.2, -17, white));
+  g.add(box(2.7, 0.75, 0.10, 6.7, ground + 1.45, -15.56,
+    new THREE.MeshStandardMaterial({ color: 0x31404a, roughness: 0.35 })));
+  for (const x of [-6.1, 6.1]) {
+    const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 5.4, 8), dark);
+    pile.position.set(x, 1.2, 5.3); g.add(pile);
+    for (let y = 0.1; y < 2.8; y += 0.75) g.add(box(0.95, 0.25, 0.18, x, y, 4.82, yellow));
+  }
+  for (const x of [-6.8, 6.8]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5.8, 6), steel);
+    post.position.set(x, ground + 2.9, -10); g.add(post);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xffedc2, emissive: 0xffca70, emissiveIntensity: 1.2 }));
+    lamp.position.set(x, ground + 5.85, -10); g.add(lamp);
+  }
+  g.position.set(ex, 0, ez);
+  g.rotation.y = Math.atan2(dx, dz);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
 export function createShips(scene, heightAt = null) {
   const ships = [];
 
@@ -365,6 +431,9 @@ export function createShips(scene, heightAt = null) {
   addShip(cruiseFerry('silja'), ROUTES.silja, 9.8, 0.7, -1, false, 'silja');
   addShip(roadFerry(), ROUTES.roadferry, 3.0, 0.4, 1, true, 'roadferry');  // a lossi never turns around
   addShip(connectionVessel(), ROUTES.utoline, 5.0, 0.55, 1, false, 'utoline');
+  const rf = ROUTES.roadferry;
+  scene.add(roadFerryTerminal(rf[0], rf[1], heightAt));
+  scene.add(roadFerryTerminal(rf[rf.length - 1], rf[rf.length - 2], heightAt));
 
   // BERTHED ferries at their real Helsinki terminals: a Viking Line ship at
   // Katajanokka, a Silja Line ship at the Olympia Terminal (South Harbour), a
