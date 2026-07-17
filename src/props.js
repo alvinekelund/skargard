@@ -128,11 +128,20 @@ function smallCraftHull(L, B, freeboard, mat, doubleEnded = false) {
     s.quadraticCurveTo(-hb, stern + L * 0.12, -hb, L * 0.02);
   }
   s.quadraticCurveTo(-hb, bow - L * 0.24, 0, bow);
-  const geo = new THREE.ExtrudeGeometry(s, { depth: freeboard + 0.45, bevelEnabled: false });
+  const geo = new THREE.ExtrudeGeometry(s, {
+    depth: freeboard + 0.45, bevelEnabled: true, bevelSegments: 2,
+    bevelSize: Math.min(0.1, B * 0.055), bevelThickness: 0.075,
+  });
   geo.rotateX(-Math.PI / 2);
   const hull = new THREE.Mesh(geo, mat);
   hull.position.y = -0.43;
-  return hull;
+  const bootGeo = new THREE.ExtrudeGeometry(s, {
+    depth: 0.24, bevelEnabled: true, bevelSegments: 1, bevelSize: 0.035, bevelThickness: 0.035,
+  });
+  bootGeo.rotateX(-Math.PI / 2);
+  const boot = new THREE.Mesh(bootGeo, M.woodDark); boot.position.y = -0.46;
+  const group = new THREE.Group(); group.add(hull, boot);
+  return group;
 }
 
 // a wooden skiff (~3.5 m): shaped hull, dark interior well, two thwarts,
@@ -150,6 +159,13 @@ function rowboat(rng) {
   for (const s of [1, -1]) {                    // gunwale rails
     const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 2.15), M.wood);
     rail.position.set(0.33 * s, 0.42, 0); g.add(rail);
+  }
+  for (const s of [1, -1]) {                    // shipped oars across the thwarts
+    const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, 2.25, 5), M.wood);
+    oar.rotation.z = Math.PI / 2; oar.rotation.y = s * 0.16;
+    oar.position.set(0, 0.48, s * 0.18); g.add(oar);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.035, 0.13), M.wood);
+    blade.position.set(s * 1.18, 0.48, s * 0.18); blade.rotation.y = s * 0.16; g.add(blade);
   }
   return g;
 }
@@ -178,6 +194,16 @@ function motorboat(rng) {
     const rub = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 3.2), M.woodDark);
     rub.position.set(0.66 * s, 0.55, -0.1); g.add(rub);
   }
+  for (const s of [1, -1]) {                                       // stainless bow rail
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 2.35, 5), M.steel);
+    rail.rotation.x = Math.PI / 2 - 0.15; rail.position.set(s * 0.62, 0.82, 1.25); g.add(rail);
+    for (const z of [0.55, 1.55]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.55, 5), M.steel);
+      post.position.set(s * 0.64, 0.72, z); g.add(post);
+    }
+  }
+  const nav = new THREE.Mesh(new THREE.SphereGeometry(0.055, 6, 5), M.lamp);
+  nav.position.set(0, 0.92, 2.35); nav.scale.set(1, 0.7, 1); g.add(nav);
   return g;
 }
 
@@ -296,6 +322,13 @@ function smallSailboat(rng) {
   wire(0, 7.6, 0.1, 0, 0.6, 2.05);                                 // forestay
   wire(0, 7.6, 0.1, 0, 0.55, -2.1);                                // backstay
   wire(0, 7.4, 0.1, 0.6, 0.6, 0.1); wire(0, 7.4, 0.1, -0.6, 0.6, 0.1);  // shrouds
+  for (const s of [1, -1]) {                                       // lifeline + stanchions
+    for (const z of [-1.65, -0.55, 0.55, 1.55]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.48, 4), M.steel);
+      post.position.set(s * 0.72, 0.83, z); g.add(post);
+    }
+    wire(s * 0.72, 1.04, -1.65, s * 0.72, 1.04, 1.55);
+  }
   const pulpit = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.015, 5, 10, Math.PI), M.steel);
   pulpit.position.set(0, 0.72, 1.95); pulpit.rotation.y = Math.PI / 2; g.add(pulpit);
   return g;
@@ -509,7 +542,7 @@ function sauna(rng) {
 // lay out a whole guest harbour from an anchor on the shore (ax,az) and a
 // seaward axis (unit vector out into the basin). Fingers reach out over water,
 // boats berth both sides, boathouses + café sit inshore.
-function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
+function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis, center) {
   const [vx, vz] = axis;                 // seaward
   const rx = vz, rz = -vx;               // abeam (along the shore)
   const ang = Math.atan2(vx, vz);        // heading down the fingers
@@ -569,6 +602,7 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis) {
         const side = s * (3.0 + rng() * 0.7);
         const boatX = fx + vx * along + rx * side, boatZ = fz + vz * along + rz * side;
         if (heightAt(boatX, boatZ) > -0.6) continue;
+        if ((boatX - center.x) ** 2 + (boatZ - center.y) ** 2 < 32 ** 2) continue;
         const r = rng();
         const b = r < 0.6 ? smallSailboat(rng) : r < 0.85 ? motorboat(rng) : rowboat(rng);
         if (r < 0.6) b.scale.setScalar(1.35 + rng() * 0.8);       // yachts 8–13 m
@@ -1263,7 +1297,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
     let vx = sea[0] - land[0], vz = sea[1] - land[1];
     const vl = Math.hypot(vx, vz) || 1;
-    buildHarbor(group, dyn, rng, heightAt, H, land[0], land[1], [vx / vl, vz / vl]);
+    buildHarbor(group, dyn, rng, heightAt, H, land[0], land[1], [vx / vl, vz / vl], center);
   }
 
   // ── Utö extras: the pilot station + radar mast on the real island ──
@@ -1350,6 +1384,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
+      if ((bx - center.x) ** 2 + (bz - center.y) ** 2 < 32 ** 2) continue;
       const r = rng();
       const b = r < 0.5 ? smallSailboat(rng) : r < 0.8 ? motorboat(rng) : rowboat(rng);
       // guest-harbour boats are 6–12 m — comparable to the Swan, not dinghies
