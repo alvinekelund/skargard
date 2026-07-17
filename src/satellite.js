@@ -135,6 +135,25 @@ export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = 
     return drewAny && my === token;
   }
 
+  // Calibrated against measured Esri pixels at ground-truth sites (2026-07):
+  //   Biskopsö forest  r .20 g .26 b .18  luma .23   (g−r +.065, g−b +.078)
+  //   Jurmo heath      r .28 g .30 b .21  luma .285  (g−r +.017)
+  //   open Baltic sea  r .10 g .23 b .17  luma .186  (g−r +.135)
+  // The Baltic reads TEAL — sea is green-dominant like forest, so hue alone
+  // cannot split them. What does: sea has very low RED; heath has r ≈ g;
+  // bare rock/built is grey (g ≈ b). An HSV cascade misread dark canopy as
+  // water and starved real forests of trees.
+  function classifyPixel(rf, gf, bf) {
+    const luma = 0.299 * rf + 0.587 * gf + 0.114 * bf;
+    const gr = gf - rf, gb = gf - bf;
+    if (luma < 0.05) return 0;                                            // near-black: water / hard shadow
+    if (rf < 0.13 && gr > 0.10 && gb > 0.045 && luma < 0.26) return 0;    // teal sea (very low red)
+    if (gr >= 0.04 && gb >= 0.035 && luma < 0.30) return 1;               // dark–mid green: tree canopy
+    if (gr >= 0.035 && gb >= 0.05 && luma >= 0.30) return 2;              // bright saturated green: field
+    if (gb < 0.035 && luma >= 0.30) return 3;                             // grey and pale: rock / built
+    return 4;                                                             // heath / scrub / mixed
+  }
+
   // Classify the already-downloaded aerial image at its native ~1.2 m scale.
   // A 3x3 mean suppresses single-pixel shadows; 4 m cache cells keep the tens
   // of thousands of vegetation probes cheap during a region build.
@@ -149,26 +168,51 @@ export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = 
     const d = ctx.getImageData(sx, sy, 3, 3).data;
     let r = 0, g = 0, b = 0;
     for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-    r /= 9; g /= 9; b /= 9;
-    const rf = r / 255, gf = g / 255, bf = b / 255;
-    const mx = Math.max(rf, gf, bf), mn = Math.min(rf, gf, bf), delta = mx - mn;
-    const sat = mx ? delta / mx : 0;
-    let hue = 0;
-    if (delta) {
-      if (mx === rf) hue = (60 * ((gf - bf) / delta)) % 360;
-      else if (mx === gf) hue = 60 * ((bf - rf) / delta) + 120;
-      else hue = 60 * ((rf - gf) / delta) + 240;
-      if (hue < 0) hue += 360;
-    }
-    let cl;
-    if (mx < 0.14 || (b > g && b > r && mx < 0.30)) cl = 0;       // water
-    else if (sat < 0.17 && mx > 0.30) cl = 3;                      // rock/roof
-    else if (hue >= 85) cl = mx < 0.42 ? (sat >= 0.24 && hue >= 96 ? 1 : 4) : 2;
-    else if (hue >= 60) cl = mx < 0.28 && sat > 0.34 ? 1 : mx > 0.46 && sat > 0.25 ? 2 : 4;
-    else cl = sat < 0.20 && mx > 0.40 ? 3 : mx < 0.16 ? 0 : 4;
+    const cl = classifyPixel(r / 9 / 255, g / 9 / 255, b / 9 / 255);
     classCache.set(ck, cl);
     return cl;
   }
 
-  return { texture, box, update, sampleClass, hasFrame: (cx, cz) => readyKey === frameKey(cx, cz), get ready() { return ready; } };
+  // Bulk classification of a world-space rect onto an (nx+1)×(nz+1) lattice.
+  // The whole mosaic is read back ONCE per assembled frame (getImageData is a
+  // GPU sync — doing it per island took seconds); every island then classifies
+  // from that shared buffer. Each lattice point is the mean of a small pixel
+  // block around it. Returns Uint8Array (z-major rows) or null when the photo
+  // isn't ready / the rect leaves the mosaic.
+  let frameData = null;                        // Uint8ClampedArray of the full canvas
+  let frameDataKey = '';
+  function classifyLattice(x0, z0, w, h, nx, nz) {
+    if (!ready) return null;
+    if (x0 < box.x || z0 < box.y || x0 + w > box.x + box.z || z0 + h > box.y + box.w) return null;
+    if (frameDataKey !== readyKey) {
+      frameData = ctx.getImageData(0, 0, canvasSize, canvasSize).data;
+      frameDataKey = readyKey;
+    }
+    const d = frameData;
+    const px0 = Math.max(0, Math.floor((x0 - box.x) / box.z * canvasSize));
+    const py0 = Math.max(0, Math.floor((z0 - box.y) / box.w * canvasSize));
+    const pw = Math.min(canvasSize - px0, Math.max(2, Math.ceil(w / box.z * canvasSize)));
+    const ph = Math.min(canvasSize - py0, Math.max(2, Math.ceil(h / box.w * canvasSize)));
+    const out = new Uint8Array((nx + 1) * (nz + 1));
+    const blk = Math.max(1, Math.floor(Math.min(pw / (nx + 1), ph / (nz + 1)) * 0.5));
+    for (let j = 0; j <= nz; j++) {
+      const pcy = py0 + Math.min(ph - 1, Math.round(j / nz * (ph - 1)));
+      for (let i = 0; i <= nx; i++) {
+        const pcx = px0 + Math.min(pw - 1, Math.round(i / nx * (pw - 1)));
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -blk; dy <= blk; dy++) {
+          const yy = pcy + dy; if (yy < py0 || yy >= py0 + ph) continue;
+          for (let dx = -blk; dx <= blk; dx++) {
+            const xx = pcx + dx; if (xx < px0 || xx >= px0 + pw) continue;
+            const o = (yy * canvasSize + xx) * 4;
+            r += d[o]; g += d[o + 1]; b += d[o + 2]; n++;
+          }
+        }
+        out[j * (nx + 1) + i] = classifyPixel(r / n / 255, g / n / 255, b / n / 255);
+      }
+    }
+    return out;
+  }
+
+  return { texture, box, update, sampleClass, classifyLattice, hasFrame: (cx, cz) => readyKey === frameKey(cx, cz), get ready() { return ready; } };
 }

@@ -891,6 +891,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // terrain shader fades the aerial drape out inside it (see uCity above)
   const _cityDisc = new THREE.Vector4(0, 0, 1, 0);
   const islandMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, envMapIntensity: 0.4 });
+  // the closed-canopy blanket: matte, lit like foliage, never glossy
+  const canopyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, envMapIntensity: 0.35 });
   islandMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.uniforms.uRockD = { value: rockD };
@@ -933,13 +935,26 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           vec2 suv = (vWPos.xz - uSatBox.xy) / uSatBox.zw;
           if (suv.x > 0.002 && suv.x < 0.998 && suv.y > 0.002 && suv.y < 0.998) {
             vec3 sat = texture2D(uSat, suv).rgb;
-            sat = pow(sat * 1.5, vec3(0.92));              // lift the aerial exposure so it reads at dusk too
-            float land = smoothstep(0.1, 0.55, vWPos.y);  // keep the wet granite only at the very shore
+            // Classify on the RAW pixel, then tone-lift for display.
+            float rawLuma = dot(sat, vec3(0.299, 0.587, 0.114));
             // tiny skerries are sub-pixel in the photo, so their pixel is SEA —
-            // dark blue-green paint made them look like teal pillows. Reject
-            // water-looking pixels and let the granite show instead.
-            float luma = dot(sat, vec3(0.299, 0.587, 0.114));
-            float waterLike = (1.0 - smoothstep(0.16, 0.30, luma)) * step(sat.r, sat.b * 1.25);
+            // reject water-looking pixels and let the granite show instead.
+            // Measured Baltic sea reads TEAL (green-dominant, like forest);
+            // its true signature is very low RED — not blueness. The old
+            // blue-based test also caught dark pine canopy and punched
+            // granite holes into real forest.
+            float waterLike = (1.0 - smoothstep(0.20, 0.27, rawLuma))
+                            * step(sat.r, 0.13)
+                            * step(0.10, sat.g - sat.r);
+            // Shadow-anchored midtone lift: the photo pops through the filmic
+            // grade, but dark canopy STAYS dark forest and streets stay drawn.
+            // (The old flat pow(sat*1.5, .92) washed everything to pastel.)
+            sat *= mix(0.98, 1.36, smoothstep(0.06, 0.45, rawLuma));
+            sat = mix(vec3(dot(sat, vec3(0.299, 0.587, 0.114))), sat, 1.12);
+            // Granite shore apron: below ~1.4 m the glaciated rock owns the
+            // waterline — the archipelago's signature geology — and the photo
+            // takes over on the vegetated ground above.
+            float land = smoothstep(0.35, 1.45, vWPos.y);
             land *= 1.0 - waterLike;
             // Keep the measured city fabric. Earlier versions removed the
             // aerial layer downtown and replaced Helsinki's actual streets,
@@ -1108,6 +1123,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // the world is 60×55 km at 1:1 — only the region around the boat is built;
   // rebuild() streams a new region in when the boat moves or teleports
   let geoParts = [];
+  let canopyParts = [];
   let treeBudget = 26000;
   let grassBudget = 4200, slabBudget = 1300, reedBudget = 2200;
 
@@ -1265,6 +1281,101 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       for (let k = 0; k < c._v.length; k++) { const v = c._v[k]; if (v > 0) { land++; if (v === 1) f++; } }
       isl._forestShare = land ? f / land : 0;
     }
+    // ── closed-canopy blanket ──────────────────────────────────────────
+    // Instanced trees alone can never close a mature wood: a real closed
+    // canopy is ~1 crown / 25 m², millions of instances at region scale.
+    // (An old comment promised "distant stands use geometric LOD" — no such
+    // LOD existed; the woods rendered as parkland.) So the cover data raises
+    // a low-poly canopy SURFACE over every closed-forest cell: from the
+    // water the wood reads as the solid dark wall it really is, while the
+    // instanced trees keep supplying true silhouettes at the edges and
+    // shores, and emergent crowns poke through the blanket.
+    let canopyLat = null, canopyNX = 0, canopyNZ = 0;
+    // The live photo refines WHERE things stand — but only the calibrated bake
+    // knows WHAT an island is. On Jurmo the dark prostrate juniper mats are
+    // spectrally identical to pine canopy from above; trusting raw pixels put
+    // 3,000 trees on Finland's most famously treeless island. So: live pixels
+    // only steer vegetation on islands the bake itself calls forested.
+    const liveTrust = useLiveCover && (!satGrid || (isl._forestShare ?? 0) >= 0.12);
+    const blanketWorthy = (satGrid || hasWood || (isl.cover && isl.cover.d === 1)) && isl.A > 9000
+      && !(satGrid && !hasWood && (isl._forestShare ?? 0) < 0.03);   // bare skerries: skip early
+    if (blanketWorthy) {
+      const bw = bbox.maxX - bbox.minX, bd = bbox.maxZ - bbox.minZ;
+      const cellC = Math.max(10, Math.max(bw, bd) / 100);
+      const nxC = Math.max(2, Math.ceil(bw / cellC)), nzC = Math.max(2, Math.ceil(bd / cellC));
+      const oxC = (bbox.minX + bbox.maxX) / 2, ozC = (bbox.minZ + bbox.maxZ) / 2;
+      // forest mask on the lattice — native photo when present, else the
+      // baked grid, else the OSM wood polygons / dominant class
+      let mask = liveTrust ? satellite.classifyLattice(cx + bbox.minX, cz + bbox.minZ, bw, bd, nxC, nzC) : null;
+      if (!mask) {
+        mask = new Uint8Array((nxC + 1) * (nzC + 1));
+        for (let j = 0; j <= nzC; j++) {
+          for (let i = 0; i <= nxC; i++) {
+            const lx = bbox.minX + (i / nxC) * bw, lz = bbox.minZ + (j / nzC) * bd;
+            let cl = 0;
+            if (satGrid) cl = coverAt(isl, lx, lz);
+            else if (hasWood && inCover(isl._wood, cx + lx, cz + lz)) cl = 1;
+            else if (isl.cover && isl.cover.d === 1) cl = 1;
+            mask[j * (nxC + 1) + i] = cl;
+          }
+        }
+      }
+      // mapped heath overrides the mask too — no canopy blanket on Jurmo
+      if (hasHeath) {
+        for (let j = 0; j <= nzC; j++) {
+          for (let i = 0; i <= nxC; i++) {
+            const k = j * (nxC + 1) + i;
+            if (mask[k] !== 1) continue;
+            const lx = bbox.minX + (i / nxC) * bw, lz = bbox.minZ + (j / nzC) * bd;
+            if (inCover(isl._heath, cx + lx, cz + lz)) mask[k] = 4;
+          }
+        }
+      }
+      let fCount = 0;
+      for (let k = 0; k < mask.length; k++) if (mask[k] === 1) fCount++;
+      if (fCount >= 8) {
+        canopyLat = mask; canopyNX = nxC; canopyNZ = nzC;
+        const F = (i, j) => mask[Math.min(nzC, Math.max(0, j)) * (nxC + 1) + Math.min(nxC, Math.max(0, i))] === 1;
+        const geoC = new THREE.PlaneGeometry(bw, bd, nxC, nzC);
+        geoC.rotateX(-Math.PI / 2);
+        geoC.translate(oxC, 0, ozC);
+        const posC = geoC.attributes.position;
+        const colC = new Float32Array(posC.count * 3);
+        const deepC = new THREE.Color(0x243722), midC = new THREE.Color(0x35502f), sunC = new THREE.Color(0x49653a);
+        const cTmp = new THREE.Color();
+        for (let j = 0; j <= nzC; j++) {
+          for (let i = 0; i <= nxC; i++) {
+            const vi = j * (nxC + 1) + i;
+            const lxL = posC.getX(vi), lzL = posC.getZ(vi);   // island-local coords
+            const ty = islandHeight(lxL, lzL, isl);
+            let share = 0;
+            for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) share += F(i + di, j + dj) ? 1 : 0;
+            share /= 9;
+            // a lone forest lattice point among open cells is classifier
+            // noise (a juniper mat, a shadow) — raising it makes an absurd
+            // green pimple. Only coherent woods rise.
+            if (F(i, j) && ty > 0.35 && share >= 0.38) {
+              const n = fbm((cx + lxL) * 0.045, (cz + lzL) * 0.045, 3) * 0.5 + 0.5;
+              // crown height: TRUE mature canopy top (~15–21 m), mild droop at
+              // the wood's edge — from the water it must read as the tall dark
+              // wall a Finnish forest really is, not a knee-high thicket
+              const hCan = (15.0 + n * 6.0) * (0.55 + 0.45 * share);
+              posC.setY(vi, ty + hCan);
+              const m = fbm((cx + lxL) * 0.11, (cz + lzL) * 0.11, 2) * 0.5 + 0.5;
+              cTmp.copy(deepC).lerp(midC, m).lerp(sunC, Math.max(0, n - 0.55) * 0.9);
+              colC[vi * 3] = cTmp.r; colC[vi * 3 + 1] = cTmp.g; colC[vi * 3 + 2] = cTmp.b;
+            } else {
+              posC.setY(vi, ty - 3.0);   // sink under the ground — clean borders
+              colC[vi * 3] = deepC.r; colC[vi * 3 + 1] = deepC.g; colC[vi * 3 + 2] = deepC.b;
+            }
+          }
+        }
+        geoC.setAttribute('color', new THREE.BufferAttribute(colC, 3));
+        geoC.computeVertexNormals();
+        canopyParts.push(geoC);
+      }
+    }
+
     if (isl.cover ? satForest : (kind === 'forest' || hasWood)) {
       // base bonus scales with area: a flat constant times 50 skerries used
       // to drain the whole region budget before the main island's turn
@@ -1282,7 +1393,12 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         // the big DEM islands the ramp is so gentle that a height cutoff would
         // strip the first 100 m of coast bare — pines grow to the rock's edge
         if (sp[2] !== undefined ? (y < 0.12 || y > H + 4.0) : (y < 0.9 || y > H + 4.0)) continue;
-        const liveClass = useLiveCover ? satellite.sampleClass(cx + lx, cz + lz) : null;
+        // OSM-mapped heath is AUTHORITATIVE over every classifier: no pixel
+        // test can tell prostrate juniper from pine canopy on a moraine heath
+        // (Jurmo!), but the surveyors who walked it could. This veto once kept
+        // Jurmo bare and was silently demoted when the cover grids landed.
+        if (hasHeath && inCover(isl._heath, cx + lx, cz + lz)) continue;
+        const liveClass = liveTrust ? satellite.sampleClass(cx + lx, cz + lz) : null;
         if (liveClass !== null) {                  // native ~1.2 m PHOTO decides
           if (liveClass !== 1 && !(liveClass === 4 && (isl._forestShare ?? 0) > 0.22 && treeRng() < 0.32)) continue;
         } else if (satGrid) {                      // baked 12–100 m fallback
@@ -1292,6 +1408,18 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             const cl = coverAt(isl, lx, lz);
             const share = isl._forestShare;
             if (!(share > 0.22 && (cl === 4 || cl === 0) && treeRng() < (cl === 4 ? 0.65 : 0.4))) continue;
+          } else if ((isl._forestShare ?? 0) < 0.12) {
+            // essentially-treeless islands (Jurmo!): isolated 'forest' cells
+            // are dark juniper mats fooling the classifier. A real grove is
+            // COHERENT — demand a solid core of RAW grid cells (forestAt's
+            // dilation defeats the test) at the grid's own pitch, so the
+            // village pines stay and the moraine heath keeps its bare sweep.
+            const st = Math.max(isl.cover.dx || 25, isl.cover.dz || 25);
+            const nb = (coverAt(isl, lx + st, lz) === 1 ? 1 : 0)
+                     + (coverAt(isl, lx - st, lz) === 1 ? 1 : 0)
+                     + (coverAt(isl, lx, lz + st) === 1 ? 1 : 0)
+                     + (coverAt(isl, lx, lz - st) === 1 ? 1 : 0);
+            if (coverAt(isl, lx, lz) !== 1 || nb < 3) continue;
           }
         } else if (hasWood) {                      // else the OSM forest boundary
           if (!inCover(isl._wood, cx + lx, cz + lz)) continue;
@@ -1299,6 +1427,21 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
           if (inCover(isl._heath, cx + lx, cz + lz)) continue; // mapped heath stays treeless
         }
         if (nearRoad(cx + lx, cz + lz)) continue;  // keep the gravel cut open
+        // deep-interior samples are already covered by the canopy blanket —
+        // spend most of the instance budget on edges, shores and clearings
+        // where individual silhouettes are what the eye actually reads
+        if (canopyLat) {
+          const gi = Math.round((lx - bbox.minX) / Math.max(1e-6, bbox.maxX - bbox.minX) * canopyNX);
+          const gj = Math.round((lz - bbox.minZ) / Math.max(1e-6, bbox.maxZ - bbox.minZ) * canopyNZ);
+          let interior = true;
+          for (let dj = -1; dj <= 1 && interior; dj++) {
+            for (let di = -1; di <= 1; di++) {
+              const ii = Math.min(canopyNX, Math.max(0, gi + di)), jj = Math.min(canopyNZ, Math.max(0, gj + dj));
+              if (canopyLat[jj * (canopyNX + 1) + ii] !== 1) { interior = false; break; }
+            }
+          }
+          if (interior && treeRng() > 0.38) continue;   // 38% still spawn = emergent crowns
+        }
         const e = 0.6;
         const dy = Math.hypot(
           islandHeight(lx+e,lz,isl) - islandHeight(lx-e,lz,isl),
@@ -1649,7 +1792,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const m of [islandMat, canopyMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const arr of [pineGeos, scotsGeos, birchGeos]) for (const gg of arr) { gg.trunk.__shared = true; gg.canopy.__shared = true; }
   for (const g of [juniperGeo, keloGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
@@ -2051,7 +2194,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
-    geoParts = []; pineMats = [[], [], []]; scotsMats = [[], [], []]; birchMats = [[], [], []];
+    geoParts = []; canopyParts = []; pineMats = [[], [], []]; scotsMats = [[], [], []]; birchMats = [[], [], []];
     juniperMats = []; keloMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 15000;                   // close forest remains dense; distant stands use geometric LOD
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
@@ -2158,6 +2301,15 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const mesh = new THREE.Mesh(merged, islandMat);
       mesh.castShadow = true; mesh.receiveShadow = true;
       activeGroup.add(mesh);
+    }
+    // the closed-canopy blanket — also a single draw call; it casts no shadow
+    // (a giant slab shadow would flatten the light) and the instanced trees
+    // provide the shadow detail that matters at the shoreline
+    if (canopyParts.length) {
+      const mergedC = BufferGeometryUtils.mergeGeometries(canopyParts, false);
+      const meshC = new THREE.Mesh(mergedC, canopyMat);
+      meshC.castShadow = false; meshC.receiveShadow = false;
+      activeGroup.add(meshC);
     }
     for (let v = 0; v < NV; v++) {
       makeInstanced(pineGeos[v].trunk, trunkMat, pineMats[v]);
