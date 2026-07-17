@@ -56,6 +56,11 @@ export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = 
   const cache = new Map();                     // "x/y" → HTMLImageElement | null
   let token = 0;
   let ready = false;
+  let readyKey = '';
+  let pendingKey = '';
+  let pendingPromise = null;
+  const classCache = new Map();
+  const frameKey = (cx, cz) => `${Math.round(cx)},${Math.round(cz)}`;
 
   function fetchTile(tx, ty) {
     const key = tx + '/' + ty;
@@ -71,10 +76,23 @@ export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = 
 
   // rebuild the composite for a region centred on world (cx, cz)
   async function update(cx, cz) {
+    const key = frameKey(cx, cz);
+    if (readyKey === key) return true;
+    if (pendingKey === key && pendingPromise) return pendingPromise;
+    pendingKey = key;
+    pendingPromise = assemble(cx, cz, key);
+    return pendingPromise;
+  }
+
+  async function assemble(cx, cz, key) {
     const my = ++token;
     const x0 = cx - half, z0 = cz - half, span = half * 2;
-    box.set(x0, z0, span, span);
-    ctx.fillStyle = '#223038'; ctx.fillRect(0, 0, canvasSize, canvasSize);  // new frame
+    // Compose offscreen. The currently displayed texture and its coordinate
+    // box remain a matched pair until every replacement tile is present.
+    const work = document.createElement('canvas');
+    work.width = work.height = canvasSize;
+    const wctx = work.getContext('2d');
+    wctx.fillStyle = '#223038'; wctx.fillRect(0, 0, canvasSize, canvasSize);
 
     const lonMin = worldToLon(x0), lonMax = worldToLon(x0 + span);
     const latN = worldToLat(z0), latS = worldToLat(z0 + span);   // z0 (min z) is north
@@ -98,15 +116,59 @@ export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = 
       const px1 = pxOf(lonToWorld(tile2lon(j.tx + 1, zoom)));
       const py0 = pyOf(latToWorld(tile2lat(j.ty, zoom)));
       const py1 = pyOf(latToWorld(tile2lat(j.ty + 1, zoom)));
-      ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0);
+      wctx.drawImage(img, px0, py0, px1 - px0, py1 - py0);
       drewAny = true;
     }
     // Upload once after the complete mosaic is assembled. Updating the GPU for
     // every one of 20–30 tiles caused visible checkerboard construction and a
     // large startup hitch at the exact moment terrain was streaming in.
-    if (drewAny) { texture.needsUpdate = true; ready = true; }
-    return ready;
+    if (drewAny && my === token) {
+      ctx.clearRect(0, 0, canvasSize, canvasSize);
+      ctx.drawImage(work, 0, 0);
+      box.set(x0, z0, span, span);
+      texture.needsUpdate = true;
+      ready = true;
+      readyKey = key;
+      classCache.clear();
+    }
+    if (pendingKey === key) { pendingKey = ''; pendingPromise = null; }
+    return drewAny && my === token;
   }
 
-  return { texture, box, update, get ready() { return ready; } };
+  // Classify the already-downloaded aerial image at its native ~1.2 m scale.
+  // A 3x3 mean suppresses single-pixel shadows; 4 m cache cells keep the tens
+  // of thousands of vegetation probes cheap during a region build.
+  function sampleClass(x, z) {
+    if (!ready || x < box.x || z < box.y || x >= box.x + box.z || z >= box.y + box.w) return null;
+    const ck = `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
+    if (classCache.has(ck)) return classCache.get(ck);
+    const px = Math.round((x - box.x) / box.z * canvasSize);
+    const py = Math.round((z - box.y) / box.w * canvasSize);
+    const sx = Math.max(0, Math.min(canvasSize - 3, px - 1));
+    const sy = Math.max(0, Math.min(canvasSize - 3, py - 1));
+    const d = ctx.getImageData(sx, sy, 3, 3).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    r /= 9; g /= 9; b /= 9;
+    const rf = r / 255, gf = g / 255, bf = b / 255;
+    const mx = Math.max(rf, gf, bf), mn = Math.min(rf, gf, bf), delta = mx - mn;
+    const sat = mx ? delta / mx : 0;
+    let hue = 0;
+    if (delta) {
+      if (mx === rf) hue = (60 * ((gf - bf) / delta)) % 360;
+      else if (mx === gf) hue = 60 * ((bf - rf) / delta) + 120;
+      else hue = 60 * ((rf - gf) / delta) + 240;
+      if (hue < 0) hue += 360;
+    }
+    let cl;
+    if (mx < 0.14 || (b > g && b > r && mx < 0.30)) cl = 0;       // water
+    else if (sat < 0.17 && mx > 0.30) cl = 3;                      // rock/roof
+    else if (hue >= 85) cl = mx < 0.42 ? (sat >= 0.24 && hue >= 96 ? 1 : 4) : 2;
+    else if (hue >= 60) cl = mx < 0.28 && sat > 0.34 ? 1 : mx > 0.46 && sat > 0.25 ? 2 : 4;
+    else cl = sat < 0.20 && mx > 0.40 ? 3 : mx < 0.16 ? 0 : 4;
+    classCache.set(ck, cl);
+    return cl;
+  }
+
+  return { texture, box, update, sampleClass, hasFrame: (cx, cz) => readyKey === frameKey(cx, cz), get ready() { return ready; } };
 }

@@ -1282,7 +1282,10 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         // the big DEM islands the ramp is so gentle that a height cutoff would
         // strip the first 100 m of coast bare — pines grow to the rock's edge
         if (sp[2] !== undefined ? (y < 0.12 || y > H + 4.0) : (y < 0.9 || y > H + 4.0)) continue;
-        if (satGrid) {                             // the PHOTO decides (dilated)
+        const liveClass = useLiveCover ? satellite.sampleClass(cx + lx, cz + lz) : null;
+        if (liveClass !== null) {                  // native ~1.2 m PHOTO decides
+          if (liveClass !== 1 && !(liveClass === 4 && (isl._forestShare ?? 0) > 0.22 && treeRng() < 0.32)) continue;
+        } else if (satGrid) {                      // baked 12–100 m fallback
           if (!forestAt(isl, lx, lz)) {
             // classifier bias correction on demonstrably forested islands:
             // its 'heath' and unclassified pixels there are mostly dark pine
@@ -1371,7 +1374,9 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       const [lx, lz] = samp();
       const y = islandHeight(lx, lz, isl);
       if (y < 0.3 || y > H + 0.4) continue;
-      if (satGrid) { const cl = coverAt(isl, lx, lz); if (cl === 1 || cl === 2) continue; }
+      const liveClass = useLiveCover ? satellite.sampleClass(cx + lx, cz + lz) : null;
+      if (liveClass !== null ? (liveClass === 1 || liveClass === 2)
+        : satGrid && (coverAt(isl, lx, lz) === 1 || coverAt(isl, lx, lz) === 2)) continue;
       if (nearRoad(cx + lx, cz + lz)) continue;
       const sc = 0.7 + treeRng() * 1.1;
       _p.set(cx + lx, y - 0.06, cz + lz);
@@ -1393,7 +1398,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         const [lx, lz] = samp();
         const y = islandHeight(lx, lz, isl);
         if (y < 0.7 || y > H + 0.3) continue;                  // on the rock, not in the wash
-        if (satGrid && coverAt(isl, lx, lz) === 1) continue;   // never inside live forest
+        const liveClass = useLiveCover ? satellite.sampleClass(cx + lx, cz + lz) : null;
+        if (liveClass !== null ? liveClass === 1 : satGrid && coverAt(isl, lx, lz) === 1) continue;
         const sc = 1.3 + treeRng() * 1.1;
         _p.set(cx + lx, y - 0.12, cz + lz);
         _s.set(sc * (0.85 + treeRng() * 0.3), sc, sc * (0.85 + treeRng() * 0.3));
@@ -1562,6 +1568,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   const activeCenter = new THREE.Vector2(1e9, 1e9);
+  let useLiveCover = false;
 
   // ── data overlay (D): draw exactly what comes from real data ──
   let debugOn = false;
@@ -2049,7 +2056,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     treeBudget = 15000;                   // close forest remains dense; distant stands use geometric LOD
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;
     activeCenter.set(cx0, cz0);
-    if (satOn) satellite.update(cx0, cz0);   // stream the aerial photo for this region
+    const precisePhoto = satOn && satellite.hasFrame(cx0, cz0);
+    useLiveCover = precisePhoto;
+    if (satOn && !precisePhoto) {
+      // First show the measured terrain without waiting on the network. Once
+      // the complete atomic mosaic arrives, rebuild this same region so trees,
+      // clearings and fields are derived from its native-resolution pixels.
+      satellite.update(cx0, cz0).then((ok) => {
+        if (ok && activeCenter.x === cx0 && activeCenter.y === cz0 && satellite.hasFrame(cx0, cz0)) rebuild(cx0, cz0);
+      });
+    }
     // is this region a city? the drape switches off inside the core disc
     _cityDisc.set(0, 0, 1, 0);
     for (const [qx, qz, qr] of CITY_QUAYS) {
