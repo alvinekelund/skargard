@@ -694,7 +694,11 @@ function islandHeight(lx, lz, isl) {
         }
       }
     }
-    if (h < 2.2 && h > -3.5) {                             // dredge filled-in harbour shelves
+    // Dredging deepens water; it must never erase low waterfront land. The old
+    // 2.2 m cutoff swallowed entire circular chunks of Helsinki and Turku quay
+    // ground, leaving real building footprints as a wall rising from open sea.
+    // Restrict the basin correction to points already at/below the waterline.
+    if (h < 0.12 && h > -3.5) {                            // dredge filled-in harbour shelves
       const wx = lx + isl.x, wz = lz + isl.z;
       for (let k = 0; k < HARBOR_BASINS.length; k++) {
         const dbx = wx - HARBOR_BASINS[k][0], dbz = wz - HARBOR_BASINS[k][1];
@@ -907,11 +911,13 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             float luma = dot(sat, vec3(0.299, 0.587, 0.114));
             float waterLike = (1.0 - smoothstep(0.16, 0.30, luma)) * step(sat.r, sat.b * 1.25);
             land *= 1.0 - waterLike;
-            // downtown the aerial photo is roofs, cars and streets that fight
-            // the extruded buildings standing on it — mottled camouflage ground.
-            // Inside a city core the drape fades out; the neutral procedural
-            // tint reads as paving instead.
-            land *= 1.0 - (1.0 - smoothstep(uCity.z * 0.8, uCity.z, distance(vWPos.xz, uCity.xy))) * uCity.w;
+            // Keep the measured city fabric. Earlier versions removed the
+            // aerial layer downtown and replaced Helsinki's actual streets,
+            // parks, quays and courtyards with one generic paving tint. The 3D
+            // footprints cover source roofs; the remaining photo is precisely
+            // the evidence that makes the spaces between them recognisable.
+            float cityMask = (1.0 - smoothstep(uCity.z * 0.8, uCity.z, distance(vWPos.xz, uCity.xy))) * uCity.w;
+            land *= mix(1.0, 0.88, cityMask);
             diffuseColor.rgb = mix(diffuseColor.rgb, sat, land * uSatOn);
           }
         }`)
@@ -1646,9 +1652,14 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   // (the chart draws some islands smaller than the road network knows them).
   function buildRoadMesh(regionRoads, regionBridges) {
     const pos = [], col = [], idx = [], bridges = [];
-    // asphalt: dark grey with a warm-grey shoulder on minor lanes
+    // Asphalt plus a pale granite/concrete pedestrian edge in actual city
+    // cores. Previously Helsinki inherited the exact same isolated dark ribbon
+    // as a gravel lane on an outer island, so even correct OSM geometry did not
+    // read as a street network.
     const cMajor = new THREE.Color(0x3b3d42), cMinor = new THREE.Color(0x47443f);
-    const emitRibbon = (run, hw, cc) => {
+    const cWalk = new THREE.Color(0x9d9a90), cLine = new THREE.Color(0xd8d5c8);
+    const cityAt = (x, z) => CITY_QUAYS.some(([cx, cz, r]) => (x - cx) ** 2 + (z - cz) ** 2 < r * r);
+    const emitRibbon = (run, hw, cc, yOff = 0) => {
       if (run.length < 2) return;
       const base = pos.length / 3;
       for (let i = 0; i < run.length; i++) {
@@ -1656,7 +1667,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
         const a = run[Math.max(i - 1, 0)], b2 = run[Math.min(i + 1, run.length - 1)];
         let tx = b2[0] - a[0], tz = b2[2] - a[2];
         const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
-        pos.push(x - tz * hw, y, z + tx * hw, x + tz * hw, y, z - tx * hw);
+        pos.push(x - tz * hw, y + yOff, z + tx * hw, x + tz * hw, y + yOff, z - tx * hw);
         col.push(cc.r, cc.g, cc.b, cc.r, cc.g, cc.b);
       }
       for (let i = 0; i < run.length - 1; i++) {
@@ -1721,7 +1732,16 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       };
       let run = [];
       const flush = () => {
+        if (run.length > 1 && cityAt(run[Math.floor(run.length / 2)][0], run[Math.floor(run.length / 2)][2])) {
+          emitRibbon(run, hw + (rd.c === 1 ? 2.2 : 1.45), cWalk, -0.018);
+        }
         emitRibbon(run, hw, cc);
+        // A restrained centre marking gives major urban approaches their true
+        // road scale from the helm without drawing lane furniture on every
+        // cottage track. It is intentionally narrow and sits just proud.
+        if (rd.c === 1 && run.length > 1 && cityAt(run[Math.floor(run.length / 2)][0], run[Math.floor(run.length / 2)][2])) {
+          emitRibbon(run, 0.065, cLine, 0.012);
+        }
         run = [];
       };
       for (let i = 0; i < rd.p.length - 1; i++) {

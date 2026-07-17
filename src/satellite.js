@@ -32,7 +32,10 @@ const tile2lat = (y, z) => {
 const TILE_URL = (z, x, y) =>
   `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
 
-export function createSatellite({ zoom = 15, half = 1500, canvasSize = 2560 } = {}) {
+// z16 is ~1.2 m/pixel at 60°N: enough to preserve street edges, individual
+// roofs, small fields and exposed granite seams. z15 blurred those into 2–3 m
+// colour blocks, so the supposedly measured terrain still read procedural.
+export function createSatellite({ zoom = 16, half = 1500, canvasSize = 2560 } = {}) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = canvasSize;
   const ctx = cv.getContext('2d');
@@ -92,10 +95,12 @@ export function createSatellite({ zoom = 15, half = 1500, canvasSize = 2560 } = 
       const py0 = pyOf(latToWorld(tile2lat(j.ty, zoom)));
       const py1 = pyOf(latToWorld(tile2lat(j.ty + 1, zoom)));
       ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0);
-      texture.needsUpdate = true;
       drewAny = true;
     }
-    if (drewAny) ready = true;
+    // Upload once after the complete mosaic is assembled. Updating the GPU for
+    // every one of 20–30 tiles caused visible checkerboard construction and a
+    // large startup hitch at the exact moment terrain was streaming in.
+    if (drewAny) { texture.needsUpdate = true; ready = true; }
     return ready;
   }
 

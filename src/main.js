@@ -75,7 +75,26 @@ const boat = createBoat(scene);
   const q = new URLSearchParams(location.search);
   const qx = Number(q.get('x')), qz = Number(q.get('z')), qh = Number(q.get('heading'));
   if (Number.isFinite(qx) && Number.isFinite(qz) && q.has('x') && q.has('z')) {
-    boat.state.pos.set(qx, 0, qz);
+    // Shared inspection links sometimes point at a landmark or quay on land.
+    // A sailing app must never initialize inside a building: retain the exact
+    // requested vicinity but move the hull to the nearest navigable sample.
+    const worldHeight = (x, z) => {
+      let m = -10;
+      for (const i of archipelago.islands) {
+        const lx = x - i.x, lz = z - i.z, b = i.bbox;
+        if (lx < b.minX - 8 || lx > b.maxX + 8 || lz < b.minZ - 8 || lz > b.maxZ + 8) continue;
+        m = Math.max(m, archipelago.islandHeight(lx, lz, i));
+      }
+      return m;
+    };
+    let sx = qx, sz = qz;
+    if (worldHeight(sx, sz) > -0.65) {
+      outer: for (let r = 20; r <= 900; r += 20) for (let k = 0; k < 32; k++) {
+        const a = k / 32 * Math.PI * 2, x = qx + Math.sin(a) * r, z = qz + Math.cos(a) * r;
+        if (worldHeight(x, z) < -0.9) { sx = x; sz = z; break outer; }
+      }
+    }
+    boat.state.pos.set(sx, 0, sz);
     if (Number.isFinite(qh) && q.has('heading')) boat.state.heading = qh;
   }
   archipelago.rebuild(boat.state.pos.x, boat.state.pos.z);

@@ -756,7 +756,11 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const area = Math.abs(area2) * 0.5;
     if (area < 8) continue;
     const seed = mulberry32((Math.floor(rec.cx * 11 + rec.cz * 17) >>> 0) || 1);
-    const fallbackFloors = kind === 2 ? 2 : kind === 3 ? 4 : Math.max(2, Math.min(7, Math.round(2.2 + Math.sqrt(area) / 12 + seed() * 1.8)));
+    // Untagged height must not collapse a whole waterfront into one area-based
+    // six-storey wall. Historic Finnish blocks vary by parcel and era; retain
+    // a weak footprint signal but let deterministic parcel variation dominate.
+    const fallbackFloors = kind === 2 ? 2 : kind === 3 ? 4
+      : Math.max(2, Math.min(7, Math.round(2.6 + Math.sqrt(area) / 28 + seed() * 3.4)));
     const h = heightDm ? THREE.MathUtils.clamp(heightDm / 10, 3, 80) : fallbackFloors * 3.15;
     const baseY = Math.max(ground, 0.85) - 0.06;
     const wallC = material === 1 ? new THREE.Color(0x9b5946)
@@ -796,7 +800,10 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       roofGeo.translate(rec.cx, baseY + h + 0.18, rec.cz);
       bodyGeos.push(paintGeo(roofGeo, roofC));
     } else {
-      const cap = new THREE.ExtrudeGeometry(shape, { depth: roof === 1 ? 0.32 : 0.62, bevelEnabled: false });
+      // Complex perimeter blocks are rarely literally roofless. OSM often has
+      // no roof tag, so give unknown historic footprints a visible sheet-metal
+      // roof storey; explicit flat roofs remain thin.
+      const cap = new THREE.ExtrudeGeometry(shape, { depth: roof === 1 ? 0.32 : 1.35, bevelEnabled: false });
       cap.rotateX(-Math.PI / 2); cap.translate(rec.cx, baseY + h + 0.04, rec.cz);
       bodyGeos.push(paintGeo(cap, roofC));
     }
@@ -824,9 +831,26 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const a = p[i], b = p[(i + 1) % p.length], dx = b[0] - a[0], dz = b[1] - a[1];
       const L = Math.hypot(dx, dz); if (L < 1.2) continue;
       let wall = urbanWall(L, h, TILE);
-      wall.rotateY(Math.atan2(-dz, dx));
+      const wallYaw = Math.atan2(-dz, dx);
+      wall.rotateY(wallYaw);
       wall.translate((a[0] + b[0]) / 2, baseY + h / 2, (a[1] + b[1]) / 2);
       urbanGeos.push(paintGeo(wall, wallC));
+
+      // Stone belt course and restrained vertical bays: real Empire/Jugend
+      // façades have scale and cadence, while a naked repeated window texture
+      // reads as a game block. These details follow every source polygon edge,
+      // so they work for angled corners and courtyards without a hand-authored
+      // Helsinki exception.
+      const belt = new THREE.BoxGeometry(L, 0.22, 0.16);
+      belt.rotateY(wallYaw); belt.translate((a[0] + b[0]) / 2, baseY + Math.min(3.45, h * 0.28), (a[1] + b[1]) / 2);
+      bodyGeos.push(paintGeo(belt, C_TRIM));
+      const bays = Math.min(7, Math.max(1, Math.floor(L / 13)));
+      for (let bi = 0; bi <= bays; bi++) {
+        const t = bi / bays, px = a[0] + dx * t, pz = a[1] + dz * t;
+        const pilaster = new THREE.BoxGeometry(0.24, Math.max(2.8, h - 0.65), 0.18);
+        pilaster.rotateY(wallYaw); pilaster.translate(px, baseY + h * 0.5, pz);
+        bodyGeos.push(paintGeo(pilaster, C_TRIM));
+      }
     }
     cityFootprints.push(rec);
     placed++;
