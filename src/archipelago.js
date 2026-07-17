@@ -320,9 +320,13 @@ function scotsPineGeometry(rng, { trunkH = 2.8, spread = 1.0, flat = 0.66 } = {}
     // Open and wind-shaped, but still a volume of needles—not a stack of flat
     // parasols. The anisotropy makes branch direction visible while the fuller
     // vertical axis keeps the crown natural from a low boat viewpoint.
-    s.scale(1.12 * spread, flat, 0.78 * spread);
+    s.scale(0.84 * spread, flat * 0.82, 0.62 * spread);
     s.rotateY(rot + (rng() - 0.5) * 0.35);
-    s.translate(x * spread + (rng() - 0.5) * 0.12, y + dy, z * spread + (rng() - 0.5) * 0.12);
+    // Crown centres stay close enough to read as one irregular pine crown,
+    // but retain air gaps between distinct needle tufts. Wide offsets plus
+    // full-size spheres produced the giant mushroom silhouettes seen ashore.
+    s.translate(x * spread * 0.72 + (rng() - 0.5) * 0.12, y + dy,
+      z * spread * 0.72 + (rng() - 0.5) * 0.12);
     parts.push(paint(s, COL.scots.clone().lerp(COL.scotsDk, 0.2 + rng() * 0.45)
       .offsetHSL((rng() - 0.5) * 0.02, (rng() - 0.5) * 0.05, (rng() - 0.5) * 0.06)));
   }

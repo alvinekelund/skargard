@@ -7,29 +7,42 @@ import { mulberry32 } from './noise.js';
 //    variation across a 5×5 window tile breaks the institutional uniformity;
 //    the emissive map lights a scatter of windows for dusk. One texture → all
 //    urban blocks merge into a single draw call. ──
-let _urbanFacade = null;
-function urbanFacade() {
-  if (_urbanFacade) return _urbanFacade;
+const _urbanFacades = new Map();
+function urbanFacade(style = 0) {
+  if (_urbanFacades.has(style)) return _urbanFacades.get(style);
   const N = 8, CELL = 48, S = N * CELL;                    // 8×8 → the pattern repeats
   const alb = document.createElement('canvas'); alb.width = alb.height = S;   // every 8 panes, not 5,
   const emi = document.createElement('canvas'); emi.width = emi.height = S;   // killing the obvious grid tile
   const a = alb.getContext('2d'), e = emi.getContext('2d');
-  a.fillStyle = '#f2efe8'; a.fillRect(0, 0, S, S);        // plaster wall (tint-ready)
+  a.fillStyle = style === 1 ? '#e8ddd1' : style === 2 ? '#d9dcdd' : style === 3 ? '#e2dfd6' : '#f2efe8';
+  a.fillRect(0, 0, S, S);
   e.fillStyle = '#000'; e.fillRect(0, 0, S, S);
-  let seed = 9;
+  let seed = 9 + style * 101;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  if (style === 1) {                                      // brick bond + pale mortar
+    a.strokeStyle = 'rgba(105,92,82,.23)'; a.lineWidth = 1;
+    for (let y = 0; y < S; y += 12) { a.beginPath(); a.moveTo(0, y); a.lineTo(S, y); a.stroke(); }
+    for (let y = 0; y < S; y += 12) for (let x = (y / 12 % 2) * 12; x < S; x += 24) {
+      a.beginPath(); a.moveTo(x, y); a.lineTo(x, y + 12); a.stroke();
+    }
+  }
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
     const x = c * CELL, y = r * CELL;
-    const mx = x + CELL * 0.24, my = y + CELL * 0.2, mw = CELL * 0.52, mh = CELL * 0.6;
+    const mx = x + CELL * (style === 2 ? 0.10 : style === 3 ? 0.16 : 0.24);
+    const my = y + CELL * (style === 2 ? 0.17 : style === 3 ? 0.28 : 0.2);
+    const mw = CELL * (style === 2 ? 0.80 : style === 3 ? 0.68 : 0.52);
+    const mh = CELL * (style === 2 ? 0.68 : style === 3 ? 0.44 : style === 1 ? 0.64 : 0.6);
     // window recess + glass; a horizontal + vertical mullion → paned "cuter" window
-    a.fillStyle = '#e7e2d6'; a.fillRect(mx - 2, my - 2, mw + 4, mh + 4);   // light frame
+    a.fillStyle = style === 2 ? '#b9bec0' : '#e7e2d6'; a.fillRect(mx - 2, my - 2, mw + 4, mh + 4);
     const glass = rnd();
     a.fillStyle = glass < 0.5 ? '#59636b' : '#6b757c';     // cool grey glass, varied
     a.fillRect(mx, my, mw, mh);
-    a.strokeStyle = '#e7e2d6'; a.lineWidth = 2;
+    a.strokeStyle = style === 2 ? '#aeb4b7' : '#e7e2d6'; a.lineWidth = 2;
     a.beginPath(); a.moveTo(mx + mw / 2, my); a.lineTo(mx + mw / 2, my + mh);
-    a.moveTo(mx, my + mh * 0.5); a.lineTo(mx + mw, my + mh * 0.5); a.stroke();
-    if (rnd() < 0.3) {                                     // a lit window — warmth + brightness vary
+    if (style !== 2) a.moveTo(mx, my + mh * 0.5);
+    if (style !== 2) a.lineTo(mx + mw, my + mh * 0.5);
+    a.stroke();
+    if (rnd() < (style === 3 ? 0.16 : 0.3)) {
       const warm = 175 + rnd() * 70, br = 0.6 + rnd() * 0.38;
       e.fillStyle = `rgba(255,${205 - (215 - warm) * 0.4 | 0},${warm | 0},${br.toFixed(2)})`;
       e.fillRect(mx, my, mw, mh);
@@ -38,8 +51,9 @@ function urbanFacade() {
   const map = new THREE.CanvasTexture(alb); map.colorSpace = THREE.SRGBColorSpace;
   const emiMap = new THREE.CanvasTexture(emi);
   for (const t of [map, emiMap]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; }
-  _urbanFacade = { map, emiMap, N };
-  return _urbanFacade;
+  const facade = { map, emiMap, N };
+  _urbanFacades.set(style, facade);
+  return facade;
 }
 // a wall plane textured with the window grid; UVs repeat so panes stay ~2.4 m
 function urbanWall(w, h, tileWorld) {
@@ -682,7 +696,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   //    Proper Finnish timber houses now: stone plinth, wall, GABLED roof with
   //    the ridge along the long axis and real eaves, a chimney on dwellings,
   //    and warm lit windows — everything merged into two draw calls. ──
-  const bodyGeos = [], winGeos = [], urbanGeos = [];
+  const bodyGeos = [], winGeos = [], urbanGeos = [[], [], [], []];
   const paintGeo = (geo, color) => {
     geo = geo.index ? geo.toNonIndexed() : geo;
     const n = geo.attributes.position.count;
@@ -768,6 +782,12 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       : kind === 2 ? new THREE.Color(0xa6a49c)
       : kind === 3 ? new THREE.Color(0xd8d2c3)
       : URBAN[Math.floor(seed() * URBAN.length)];
+    // 0 historic plaster, 1 masonry/brick, 2 modern glass/concrete,
+    // 3 terminal/industrial. Explicit OSM material/use wins; untagged plans
+    // infer a stable family from height, area and parcel seed.
+    const facadeStyle = material === 1 ? 1 : material === 4 ? 2 : kind === 2 ? 3
+      : kind === 3 ? 2 : material === 3 ? 0
+      : (roof === 1 && h > 18 && seed() < 0.58) ? 2 : area > 1800 && seed() < 0.45 ? 3 : 0;
     const roofC = roof === 4 ? new THREE.Color(0x4e5750)
       : roof === 1 ? new THREE.Color(0x55595b)
       : UROOFS[Math.floor(seed() * UROOFS.length)];
@@ -826,7 +846,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
     // Windowed facade planes follow every real polygon edge and angled street
     // corner — no fitted rectangle survives visually.
-    const TILE = urbanFacade().N * 2.4;
+    const TILE = urbanFacade(facadeStyle).N * (facadeStyle === 3 ? 3.2 : 2.4);
     for (let i = 0; i < p.length; i++) {
       const a = p[i], b = p[(i + 1) % p.length], dx = b[0] - a[0], dz = b[1] - a[1];
       const L = Math.hypot(dx, dz); if (L < 1.2) continue;
@@ -834,7 +854,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const wallYaw = Math.atan2(-dz, dx);
       wall.rotateY(wallYaw);
       wall.translate((a[0] + b[0]) / 2, baseY + h / 2, (a[1] + b[1]) / 2);
-      urbanGeos.push(paintGeo(wall, wallC));
+      urbanGeos[facadeStyle].push(paintGeo(wall, wallC));
 
       // Stone belt course and restrained vertical bays: real Empire/Jugend
       // façades have scale and cadence, while a naked repeated window texture
@@ -899,7 +919,8 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const fh = 3.2, bh = floors * fh;                  // storey height, body height
       const along = bw >= bd ? bw : bd;                  // long axis
       const uplace = (geo) => { geo.rotateY(ang); geo.translate(bx, baseY, bz); return geo; };
-      const TILE = urbanFacade().N * 2.4;                // world size of one texture tile
+      const facadeStyle = rngU() < (floors >= 6 ? 0.34 : 0.12) ? 2 : rngU() < 0.16 ? 1 : 0;
+      const TILE = urbanFacade(facadeStyle).N * 2.4;      // world size of one texture tile
       // split a long block into 2–4 street segments, each its own pastel + a
       // small height step, so it doesn't read as one monolithic slab
       const nSeg = along > 34 ? Math.min(4, Math.floor(along / 22) + 1) : 1;
@@ -944,7 +965,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
           let g2 = urbanWall(w2, sbh, TILE);
           g2.rotateY(ry); g2.translate(ox + px, sbh / 2 + 0.9, oz + pz);
           g2 = paintGeo(g2, uc);                 // colour it (returns non-indexed)
-          urbanGeos.push(uplace(g2));
+          urbanGeos[facadeStyle].push(uplace(g2));
         };
         mk(sw, 0, sd / 2 + 0.02, 0);
         mk(sw, 0, -sd / 2 - 0.02, Math.PI);
@@ -1130,11 +1151,13 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   }
   // urban city facades: one merged, single-texture mesh — pastel plaster tinted
   // per building, paned windows from the shared grid texture, some lit for dusk
-  if (urbanGeos.length) {
-    const fac = urbanFacade();
-    const urban = new THREE.Mesh(mergeGeometries(urbanGeos.map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
+  for (let style = 0; style < urbanGeos.length; style++) if (urbanGeos[style].length) {
+    const fac = urbanFacade(style);
+    const urban = new THREE.Mesh(mergeGeometries(urbanGeos[style].map((g2) => g2.index ? g2.toNonIndexed() : g2), false),
       new THREE.MeshStandardMaterial({ map: fac.map, emissiveMap: fac.emiMap, emissive: 0xffd9a0,
-        emissiveIntensity: 0.85, vertexColors: true, roughness: 0.82, side: THREE.DoubleSide }));
+        emissiveIntensity: style === 3 ? 0.5 : 0.78, vertexColors: true,
+        roughness: style === 2 ? 0.48 : style === 1 ? 0.9 : 0.82, metalness: style === 2 ? 0.12 : 0,
+        side: THREE.DoubleSide }));
     urban.castShadow = true; urban.receiveShadow = true;
     group.add(urban);
   }
