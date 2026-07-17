@@ -236,15 +236,20 @@ function reedTexture(seed) {
 // a low rounded coastal rock slab — the smooth glaciated plates the Finnish
 // shore is made of (wider and flatter than a moraine boulder, lighter grey)
 function slabGeometry(rng) {
-  const geo = new THREE.IcosahedronGeometry(1, 1);
+  // a shore slab is a GLACIER-POLISHED whaleback, not a faceted lens: the old
+  // subdiv-1 icosahedron read as a row of pale boxes along every waterline.
+  // Subdiv 2 + asymmetric low-frequency swell keeps it smooth and organic.
+  const geo = new THREE.IcosahedronGeometry(1, 2);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const lump = 1 + 0.1 * Math.sin(x * 2.4 + 0.8) * Math.cos(z * 2.1) + 0.06 * Math.sin(y * 3.1);
-    p.setXYZ(i, x * 1.45 * lump, Math.max(y, -0.15) * 0.32 * lump, z * 1.15 * lump);
+    const lump = 1 + 0.14 * Math.sin(x * 1.7 + 0.8) * Math.cos(z * 1.4 + 0.5) + 0.07 * Math.sin(y * 2.3 + x * 0.9);
+    const skew = 1 + 0.18 * Math.sin(x * 0.9 - z * 1.2);        // one shoulder higher
+    p.setXYZ(i, x * 1.7 * lump, Math.max(y, -0.12) * 0.26 * lump * skew, z * 1.25 * lump);
   }
   geo.computeVertexNormals();
-  return paint(geo, new THREE.Color(0x8d867a).lerp(new THREE.Color(0x9a8a80), rng()));
+  // cool wet-granite grey — the pale warm tan glowed like sandstone crates
+  return paint(geo, new THREE.Color(0x767169).lerp(new THREE.Color(0x84796f), rng()));
 }
 
 // a ragged, narrow spruce/pine spire — trunk and canopy split so bark stays
@@ -1034,21 +1039,29 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   reedMat.map = reedTex; reedMat.alphaTest = 0.26; reedMat.side = THREE.DoubleSide;
   // THREE structural variants per species (slim/medium/broad), each its own
   // seed, so a stand mixes silhouettes instead of stamping one shape
-  const NV = 3;
+  // five structural variants per species: with only three, any close stand
+  // showed the same silhouette twice side by side — the clone tell
+  const NV = 5;
   const pineGeos = [
     pineGeometry(mulberry32(1), { tiers: 10, spread: 0.60, overlap: 0.50, tip: 0.04 }),  // tall slim spire
     pineGeometry(mulberry32(101), { tiers: 9, spread: 0.72, overlap: 0.46, tip: 0.06 }), // classic
     pineGeometry(mulberry32(202), { tiers: 8, spread: 0.86, overlap: 0.42, tip: 0.10 }), // broad, heavy
+    pineGeometry(mulberry32(307), { tiers: 9, spread: 0.66, overlap: 0.55, tip: 0.08 }), // dense narrow
+    pineGeometry(mulberry32(419), { tiers: 7, spread: 0.80, overlap: 0.36, tip: 0.13 }), // ragged, open
   ];
   const scotsGeos = [
     scotsPineGeometry(mulberry32(11), { trunkH: 3.5, spread: 0.86, flat: 0.7 }),   // tall, high crown
     scotsPineGeometry(mulberry32(111), { trunkH: 2.8, spread: 1.0, flat: 0.66 }),  // classic umbrella
     scotsPineGeometry(mulberry32(212), { trunkH: 2.2, spread: 1.22, flat: 0.58 }), // short, windswept-broad
+    scotsPineGeometry(mulberry32(313), { trunkH: 3.1, spread: 0.92, flat: 0.76 }), // high flat table
+    scotsPineGeometry(mulberry32(421), { trunkH: 1.9, spread: 1.35, flat: 0.5 }),  // storm-bent low
   ];
   const birchGeos = [
     birchGeometry(mulberry32(2), { trunkH: 3.5, full: 0.9 }),   // tall airy
     birchGeometry(mulberry32(102), { trunkH: 3.0, full: 1.0 }), // classic
     birchGeometry(mulberry32(203), { trunkH: 2.5, full: 1.15 }), // short, full
+    birchGeometry(mulberry32(311), { trunkH: 3.8, full: 0.78 }), // slender, weeping
+    birchGeometry(mulberry32(433), { trunkH: 2.7, full: 1.08 }), // leaning, round
   ];
   const juniperGeo = juniperGeometry(mulberry32(3));
   const keloGeo = keloGeometry(mulberry32(41));
@@ -1057,7 +1070,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const reedGeo = reedGeometry();
   const slabGeo = slabGeometry(mulberry32(6));
   const boulderMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, envMapIntensity: 0.4 });
-  let pineMats = [[], [], []], scotsMats = [[], [], []], birchMats = [[], [], []];
+  const freshMats = () => Array.from({ length: NV }, () => []);
+  let pineMats = freshMats(), scotsMats = freshMats(), birchMats = freshMats();
   let juniperMats = [], keloMats = [], boulderMats = [], grassMats = [], slabMats = [], reedMats = [];
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _up = new THREE.Vector3(0,1,0);
 
@@ -2226,7 +2240,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
 
   function rebuild(cx0, cz0) {
     perf.mesh = perf.color = perf.scatter = 0;
-    geoParts = []; canopyParts = []; pineMats = [[], [], []]; scotsMats = [[], [], []]; birchMats = [[], [], []];
+    geoParts = []; canopyParts = []; pineMats = freshMats(); scotsMats = freshMats(); birchMats = freshMats();
     juniperMats = []; keloMats = []; boulderMats = []; grassMats = []; slabMats = []; reedMats = [];
     treeBudget = 15000;                   // close forest remains dense; distant stands use geometric LOD
     grassBudget = 4200; slabBudget = 1300; reedBudget = 2200;

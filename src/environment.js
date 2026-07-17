@@ -184,9 +184,18 @@ export function createEnvironment(scene, renderer) {
       'vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',
       `vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );
        {
+         // capillary micro-ripple from two rotated, differently-scaled taps of
+         // the normal texture. The old version used two GLOBAL cosine plane
+         // waves — perfectly periodic diagonal bands marched across every calm
+         // anchorage (the 'repeating ripples' tell in the harbour shots).
+         // Texture noise is aperiodic and has no preferred direction.
          vec2 wp = worldPosition.xz;
-         surfaceNormal.xz += vec2(0.93, -0.38) * 0.10 * cos(dot(wp, vec2(0.93, -0.38)) * 0.9666 + uWaveTime * 3.1);
-         surfaceNormal.xz += vec2(0.64, -0.77) * 0.085 * cos(dot(wp, vec2(0.64, -0.77)) * 2.1666 + uWaveTime * 4.6);
+         mat2 Rr = mat2(0.7986, -0.6018, 0.6018, 0.7986);
+         vec2 mUv1 = Rr * wp * 0.041 + vec2(uWaveTime * 0.021, -uWaveTime * 0.016);
+         vec2 mUv2 = wp * vec2(0.0125, 0.0147) + vec2(-uWaveTime * 0.012, uWaveTime * 0.010);
+         vec3 t1 = texture2D( normalSampler, mUv1 ).xzy * 2.0 - 1.0;
+         vec3 t2 = texture2D( normalSampler, mUv2 ).xzy * 2.0 - 1.0;
+         surfaceNormal.xz += (t1.xz * 0.62 + t2.xz * 0.38) * 0.13;
          surfaceNormal = normalize(surfaceNormal);
        }`);
     // (3) longer, more dramatic sunset glitter: wider specular lobe, a bit hotter
