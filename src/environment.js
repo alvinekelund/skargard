@@ -235,16 +235,22 @@ export function createEnvironment(scene, renderer) {
       const mat = new THREE.SpriteMaterial({ map: cloudTextures[i % 3], transparent: true, depthWrite: false, fog: false });
       const spr = new THREE.Sprite(mat);
       const az = THREE.MathUtils.degToRad(preset.sunAz) + (crng() - 0.5) * Math.PI * 1.7;
-      // spread across the sky including a low band near the horizon, so clouds
-      // are in frame while sailing (looking at the sea-line), not only overhead
-      const elev = THREE.MathUtils.degToRad((preset.cloudElevHi ? 6 : 3) + crng() * (preset.cloudElevHi ? 46 : 30));
+      const radius = 4200 + crng() * 2800;
+      const [w0, w1] = preset.cloudSize || [1500, 2700];
+      const w = w0 + crng() * (w1 - w0), h = w * (0.42 + crng() * 0.2);
+      // A billboard's centre elevation is not enough: a 2.6 km card centred
+      // three degrees above the horizon extends below sea level and can cross
+      // the camera as an opaque wall. Derive a safe lower elevation from its
+      // own height and distance, keeping the whole soft card above the horizon.
+      const clearElev = Math.asin(Math.min(0.8, (h * 0.56 + 180) / radius));
+      const baseElev = THREE.MathUtils.degToRad(preset.cloudElevHi ? 7 : 5);
+      const elev = Math.max(clearElev, baseElev) + crng() * THREE.MathUtils.degToRad(preset.cloudElevHi ? 38 : 25);
       const dir = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - elev, az);
-      spr.position.copy(dir).multiplyScalar(3000 + crng() * 3000);
+      spr.position.copy(dir).multiplyScalar(radius);
       const sunAmt = Math.pow(THREE.MathUtils.clamp(dir.dot(sunDir), 0, 1), 1.6);
       mat.color.copy(cool).lerp(warm, sunAmt);
       mat.opacity = preset.cloudOpacity * (0.66 + 0.34 * crng());
-      const [w0, w1] = preset.cloudSize || [1500, 2700];
-      const w = w0 + crng() * (w1 - w0); spr.scale.set(w, w * (0.42 + crng() * 0.2), 1);
+      spr.scale.set(w, h, 1);
       cloudGroup.add(spr);
     }
   }

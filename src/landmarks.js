@@ -15,6 +15,17 @@ function box(w, h, d, x, y, z, mat) {
   return m;
 }
 
+function gableRoof(width, rise, length, wallTop, mat) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-width / 2, 0);
+  shape.lineTo(width / 2, 0);
+  shape.lineTo(0, rise);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: length, bevelEnabled: false });
+  geometry.translate(0, wallTop, -length / 2);
+  return new THREE.Mesh(geometry, mat);
+}
+
 // Helsinki Cathedral — Engel's white neoclassical church over Senate Square:
 // a Greek cross with columned porticoes, a tall green dome on a colonnaded
 // drum, four small green corner cupolas. The single most recognisable Helsinki
@@ -91,9 +102,7 @@ function turkuCathedral() {
 
   // nave (long body) + steep gable roof, apse at the east end
   g.add(box(16, 22, 46, 0, 11, 0, brick));
-  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 9.5, 8, 3), brickD);
-  roof.scale.set(1, 1, 5.1); roof.rotation.x = Math.PI / 2; roof.rotation.z = Math.PI;
-  roof.position.set(0, 26, 0); g.add(roof);
+  g.add(gableRoof(19, 8, 51, 22, brickD));
   const apse = new THREE.Mesh(new THREE.CylinderGeometry(8, 8, 20, 12, 1, false, -Math.PI / 2, Math.PI), brick);
   apse.position.set(0, 10, -23); g.add(apse);
 
@@ -164,9 +173,7 @@ function parishChurch() {
 
   // nave: fieldstone walls, then the steep roof rising higher than the walls
   g.add(box(12, 7, 30, 0, 3.5, 0, stone));
-  const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 8.6, 9, 3), shingle);
-  roof.scale.set(1, 1, 3.7); roof.rotation.x = Math.PI / 2; roof.rotation.z = Math.PI;
-  roof.position.set(0, 11.5, 0); g.add(roof);
+  g.add(gableRoof(15.5, 7.2, 32, 7, shingle));
   // slender ridge turret with a little spire and cross
   g.add(box(2.2, 3.4, 2.2, 0, 16.5, 9, timber));
   const tspire = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.8, 4.4, 4), shingle);

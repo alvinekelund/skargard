@@ -291,17 +291,37 @@ function pineGeometry(rng, { tiers = 9, spread = 0.72, overlap = 0.46, tip = 0.0
 // spruce spire, which is what gives a real archipelago wood its mixed texture.
 function scotsPineGeometry(rng, { trunkH = 2.8, spread = 1.0, flat = 0.66 } = {}) {
   const trunkG = new THREE.CylinderGeometry(0.05, 0.13, trunkH, 6); trunkG.translate(0, trunkH / 2, 0);
-  const trunk = paintGradient(trunkG, COL.trunk, COL.pineBark, trunkH * 0.15, trunkH * 0.95);
+  const trunkParts = [paintGradient(trunkG, COL.trunk, COL.pineBark, trunkH * 0.15, trunkH * 0.95)];
+  // Sparse reddish upper branches are a defining Scots-pine feature. They also
+  // visually connect the open crown to its bole; without them the old cluster
+  // of green balls looked suspended above a pole.
+  for (let i = 0; i < 5; i++) {
+    const len = 0.65 + rng() * 0.75, ang = i / 5 * Math.PI * 2 + rng() * 0.65;
+    const br = new THREE.CylinderGeometry(0.025, 0.045, len, 5);
+    br.translate(0, len * 0.5, 0); br.rotateZ(0.92 + rng() * 0.32); br.rotateY(ang);
+    br.translate(0, trunkH * (0.67 + i * 0.055), 0);
+    trunkParts.push(paint(br, COL.pineBark.clone().offsetHSL(0, 0, (rng() - 0.5) * 0.08)));
+  }
+  const trunk = BufferGeometryUtils.mergeGeometries(trunkParts, false);
   const parts = [];
   const dy = trunkH - 2.8;                                       // crown rides on top of the bole
-  // crown tufts clustered high, wide and flattened → an umbrella, not a spire
-  const blobs = [
-    [0, 3.0, 0, 1.05], [0.66, 2.78, 0.36, 0.74], [-0.6, 2.82, -0.32, 0.72],
-    [0.32, 3.34, -0.36, 0.66], [-0.34, 3.22, 0.42, 0.6], [0.1, 3.66, 0.06, 0.5],
+  // Branch-pad crown: thin, elongated needle masses with gaps between them.
+  // The previous flattened icospheres merged into a mushroom/lollipop at
+  // distance. Unequal pads and an off-centre leader make the silhouette read
+  // as a mature archipelago pine shaped by wind.
+  const pads = [
+    [0.05, 2.98, 0.0, 1.0, 0.0], [0.78, 2.82, 0.28, 0.72, 0.45],
+    [-0.68, 2.9, -0.24, 0.78, -0.34], [0.28, 3.3, -0.42, 0.68, -0.75],
+    [-0.38, 3.26, 0.42, 0.62, 0.82], [0.12, 3.58, 0.05, 0.48, 0.2],
+    [0.98, 3.05, -0.16, 0.45, -0.2],
   ];
-  for (const [x, y, z, r] of blobs) {
+  for (const [x, y, z, r, rot] of pads) {
     const s = new THREE.IcosahedronGeometry(r, 1);
-    s.scale(1.28 * spread, flat, 1.28 * spread);                 // broad and flat
+    // Open and wind-shaped, but still a volume of needles—not a stack of flat
+    // parasols. The anisotropy makes branch direction visible while the fuller
+    // vertical axis keeps the crown natural from a low boat viewpoint.
+    s.scale(1.35 * spread, flat * 0.92, 0.9 * spread);
+    s.rotateY(rot + (rng() - 0.5) * 0.35);
     s.translate(x * spread + (rng() - 0.5) * 0.12, y + dy, z * spread + (rng() - 0.5) * 0.12);
     parts.push(paint(s, COL.scots.clone().lerp(COL.scotsDk, 0.2 + rng() * 0.45)
       .offsetHSL((rng() - 0.5) * 0.02, (rng() - 0.5) * 0.05, (rng() - 0.5) * 0.06)));
@@ -315,16 +335,19 @@ function birchGeometry(rng, { trunkH = 3.0, full = 1.0 } = {}) {
   const trunk = paint(trunkG, COL.birchBark);
   const parts = [];
   const dy = trunkH - 3.0;
-  // a fuller, droopier birch crown that clothes the upper trunk instead of a
-  // tight blob on a bare white pole — lower skirt blobs + a taller core, wider
-  // and slightly flattened so it reads as an airy broadleaf, not a lollipop
-  const blobs = [
-    [0, 2.75, 0, 1.08], [0.78, 2.5, 0.4, 0.8], [-0.7, 2.58, -0.38, 0.82],
-    [0.28, 3.2, -0.28, 0.72], [-0.4, 3.08, 0.52, 0.66], [0.42, 3.55, 0.16, 0.56],
-    [-0.2, 2.2, 0.34, 0.66], [0.34, 2.24, -0.46, 0.62], [0, 3.85, 0, 0.42],
+  // Vertical, drooping sprays instead of round balls. Finnish shore birches
+  // have airy columns with visible gaps and hanging outer branchlets.
+  const sprays = [
+    [0, 2.72, 0, 0.94, 0.0], [0.72, 2.46, 0.36, 0.66, 0.18],
+    [-0.66, 2.54, -0.34, 0.7, -0.2], [0.26, 3.2, -0.28, 0.62, -0.12],
+    [-0.4, 3.06, 0.48, 0.58, 0.15], [0.38, 3.54, 0.12, 0.5, -0.08],
+    [-0.24, 2.04, 0.3, 0.56, 0.24], [0.3, 2.14, -0.42, 0.54, -0.22],
+    [0, 3.86, 0, 0.38, 0.0],
   ];
-  for (const [x, y, z, r] of blobs) {
-    const s = new THREE.IcosahedronGeometry(r * full, 1); s.scale(1.15, 0.9, 1.15); s.translate(x * full, y + dy, z * full);
+  for (const [x, y, z, r, lean] of sprays) {
+    const s = new THREE.IcosahedronGeometry(r * full, 1);
+    s.scale(0.72, 1.34, 0.64); s.rotateZ(lean + (rng() - 0.5) * 0.12);
+    s.translate(x * full, y + dy, z * full);
     parts.push(paint(s, COL.birchLeaf.clone().offsetHSL((rng() - 0.5) * 0.02, -0.06, (rng() - 0.5) * 0.09)));
   }
   return { trunk, canopy: BufferGeometryUtils.mergeGeometries(parts, false) };
@@ -1087,8 +1110,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     const geo = new THREE.PlaneGeometry(w, d, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     const ox = (bbox.minX + bbox.maxX) / 2, oz = (bbox.minZ + bbox.maxZ) / 2;
-    geo.translate(ox, 0, oz);                         // grid over the polygon's bbox
     const pos = geo.attributes.position;
+    geo.translate(ox, 0, oz);                         // grid over the polygon's bbox
     for (let i = 0; i < pos.count; i++) pos.setY(i, islandHeight(pos.getX(i), pos.getZ(i), isl));
     geo.computeVertexNormals();
     perf.mesh += performance.now() - tp; tp = performance.now();

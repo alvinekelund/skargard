@@ -51,9 +51,11 @@ const _dark = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.7 }
 const _spar = new THREE.MeshStandardMaterial({ color: 0xd8d9d5, roughness: 0.35, metalness: 0.55 });
 const _sailMat = new THREE.MeshStandardMaterial({
   color: 0xf3efe4, roughness: 0.9, metalness: 0.0, side: THREE.DoubleSide,
+  emissive: 0x817d74, emissiveIntensity: 0.22,
 });
 const _genoaMat = new THREE.MeshStandardMaterial({
   color: 0xefe9da, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide,
+  emissive: 0x817d74, emissiveIntensity: 0.22,
 });
 const HULL_COLORS = [0xece9e1, 0xe6e3db, 0x21324a, 0x0f4f57, 0x8f2d2a, 0x2b3a2c, 0xd8d4c6, 0x3a4657];
 

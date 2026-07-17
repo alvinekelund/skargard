@@ -17,7 +17,13 @@ import * as THREE from 'three';
 export const sailUniforms = { uTime: { value: 0 }, uFlap: { value: 0 } };
 
 function makeSailMaterial(phase = 0) {
-  const m = new THREE.MeshStandardMaterial({ color: 0xf2eee2, roughness: 0.9, side: THREE.DoubleSide });
+  // Dacron is strongly backlit and never turns into an opaque black wall when
+  // viewed from its shaded face. A restrained warm cloth fill approximates
+  // that transmission while preserving the directional sunset shading.
+  const m = new THREE.MeshStandardMaterial({
+    color: 0xf2eee2, roughness: 0.9, side: THREE.DoubleSide,
+    emissive: 0x8c887f, emissiveIntensity: 0.28,
+  });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = sailUniforms.uTime;
     sh.uniforms.uFlap = sailUniforms.uFlap;
@@ -52,7 +58,13 @@ function makeSailMaterial(phase = 0) {
         { float leech = smoothstep(0.955, 1.0, vSail.x);      // darker tabling band up the leech
           diffuseColor.rgb *= mix(1.0, 0.94, leech);
           float foot = smoothstep(0.03, 0.0, vSail.y);        // and along the foot
-          diffuseColor.rgb *= mix(1.0, 0.95, foot); }`);
+          diffuseColor.rgb *= mix(1.0, 0.95, foot); }`)
+      .replace('#include <opaque_fragment>', `
+        // Woven sailcloth transmits broad skylight. Preserve a cloth-coloured
+        // luminance floor after directional lighting so the leeward face can
+        // never become an opaque black screen at sunset.
+        outgoingLight = max(outgoingLight, diffuseColor.rgb * 0.34);
+        #include <opaque_fragment>`);
   };
   return m;
 }

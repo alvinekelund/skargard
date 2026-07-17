@@ -87,11 +87,27 @@ const boat = createBoat(scene);
       }
       return m;
     };
+    const landmarkClearance = [
+      [23555, -43451, 110], [4760, -39935, 115],
+      [193869, -40598, 150], [194256, -40443, 130], [44143, -72080, 145],
+    ];
+    const clearOfHazards = (x, z, margin = 105) => {
+      for (const [lx, lz, r] of landmarkClearance)
+        if ((x - lx) ** 2 + (z - lz) ** 2 < r * r) return false;
+      const m2 = margin * margin;
+      for (const route of Object.values(ROUTES)) for (let i = 0; i < route.length - 1; i++) {
+        const [ax, az] = route[i], [bx, bz] = route[i + 1];
+        const dx = bx - ax, dz = bz - az, ll = dx * dx + dz * dz || 1;
+        const t = THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / ll, 0, 1);
+        if ((x - ax - dx * t) ** 2 + (z - az - dz * t) ** 2 < m2) return false;
+      }
+      return true;
+    };
     let sx = qx, sz = qz;
-    if (worldHeight(sx, sz) > -0.65) {
+    if (worldHeight(sx, sz) > -0.65 || !clearOfHazards(sx, sz)) {
       outer: for (let r = 20; r <= 900; r += 20) for (let k = 0; k < 32; k++) {
         const a = k / 32 * Math.PI * 2, x = qx + Math.sin(a) * r, z = qz + Math.cos(a) * r;
-        if (worldHeight(x, z) < -0.9) { sx = x; sz = z; break outer; }
+        if (worldHeight(x, z) < -0.9 && clearOfHazards(x, z)) { sx = x; sz = z; break outer; }
       }
     }
     boat.state.pos.set(sx, 0, sz);
