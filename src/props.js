@@ -7,6 +7,10 @@ import { mulberry32 } from './noise.js';
 //    variation across a 5×5 window tile breaks the institutional uniformity;
 //    the emissive map lights a scatter of windows for dusk. One texture → all
 //    urban blocks merge into a single draw call. ──
+// sites owned by hand-built landmarks (cathedrals, chapels) — every generic
+// building pass must keep clear of them, including the distant skyline LOD
+export const LANDMARK_SITES = [[23555, -43451], [4760, -39935], [193869, -40598], [194256, -40443], [44143, -72080]];
+
 const _urbanFacades = new Map();
 function urbanFacade(style = 0) {
   if (_urbanFacades.has(style)) return _urbanFacades.get(style);
@@ -658,7 +662,7 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis, center) {
   }
 }
 
-export function buildProps({ activeSet, islandHeight, heightAt, center, region = {} }) {
+export function buildProps({ activeSet, islandHeight, heightAt, center, region = {}, seaAt = null }) {
   const group = new THREE.Group();
   group.name = 'props';
   const rng = mulberry32(Math.floor(center.x * 13 + center.y * 7) ^ 0x5eed);
@@ -777,7 +781,6 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   };
   // landmark churches (landmarks.js) stand on these spots — source footprints
   // at the same site must not draw through the hand-built landmark mesh
-  const LANDMARK_SITES = [[23555, -43451], [4760, -39935], [193869, -40598], [194256, -40443], [44143, -72080]];
   const onLandmarkSite = (x, z) => LANDMARK_SITES.some(([sx, sz]) => (x - sx) ** 2 + (z - sz) ** 2 < 70 * 70);
   const insidePoly = (x, z, p) => {
     let inside = false;
@@ -793,12 +796,14 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // coverage the real outline owns the site, eliminating the generic block city.
   const cityFootprints = [];
   let placed = 0;
+  let buildReach2 = 0;   // how far out the detailed pass actually rendered
   for (const rec of (region.cityBuildings || [])) {
     if (placed >= 450) break;
     const [heightDm, kind, roof, material, p] = rec.d;
     if (!p || p.length < 3 || onLandmarkSite(rec.cx, rec.cz)) continue;
     const ground = heightAt(rec.cx, rec.cz);
     if (ground < 0.05) continue;
+    if (seaAt && seaAt(rec.cx, rec.cz)) continue;   // photo says open water: phantom terrain
     let area2 = 0;
     for (let i = 0; i < p.length; i++) {
       const a = p[i], b = p[(i + 1) % p.length]; area2 += a[0] * b[1] - b[0] * a[1];
@@ -945,6 +950,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       }
     }
     cityFootprints.push(rec);
+    buildReach2 = Math.max(buildReach2, cdist(rec.cx, rec.cz));
     placed++;
   }
 
@@ -964,6 +970,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     // rendered a house rising straight out of the sea, which no plinth can
     // make honest (the judge caught one still standing in open water at −0.2)
     if (ground < 0.05) continue;
+    if (seaAt && seaAt(bx, bz)) continue;           // photo says open water: phantom terrain
     const rng2 = mulberry32(Math.floor(bx * 7 + bz * 13));
     // a shore building stands on a stone footing well proud of the sea — with
     // the floor at wave height, every low-shelf shoreline row read as flooded
@@ -1044,6 +1051,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
         mk(sd, sw / 2 + 0.02, 0, Math.PI / 2);
         mk(sd, -sw / 2 - 0.02, 0, -Math.PI / 2);
       }
+      buildReach2 = Math.max(buildReach2, cdist(bx, bz));
       placed++;
       continue;
     }
@@ -1069,6 +1077,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const rg = new THREE.ExtrudeGeometry(shp, { depth: rl, bevelEnabled: false });
       rg.translate(0, wh + 0.22, -rl / 2); rg.rotateY(Math.PI / 2);
       bodyGeos.push(place(paintGeo(rg, roofC)));
+      buildReach2 = Math.max(buildReach2, cdist(bx, bz));
       placed++;
       continue;
     }
@@ -1172,6 +1181,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
         }
       }
     }
+    buildReach2 = Math.max(buildReach2, cdist(bx, bz));
     placed++;
   }
 
@@ -1558,5 +1568,5 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     }
   }
 
-  return { group, update, counts: { seamarks: marks, buildings: placed, pierSegs: segs } };
+  return { group, update, counts: { seamarks: marks, buildings: placed, pierSegs: segs }, buildReach: Math.sqrt(buildReach2) };
 }

@@ -32,9 +32,15 @@ function gableRoof(width, rise, length, wallTop, mat) {
 // silhouette.
 function helsinkiCathedral() {
   const g = new THREE.Group();
-  const white = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.72 });
-  const green = new THREE.MeshStandardMaterial({ color: 0x6f9484, roughness: 0.55, metalness: 0.1 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xd9b45a, roughness: 0.4, metalness: 0.5 });
+  // a faint self-light: sunlit white church walls genuinely glow against sea
+  // haze — that's why they served as the coast's daymarks. Without it the fog
+  // erased the cathedral from its own famous sea approach.
+  const white = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.72, emissive: 0xfff6e6, emissiveIntensity: 0.16 });
+  // the dome must read against a hazy SKY: pale mint washed straight into the
+  // fog tone and the cathedral vanished from its own sea approach. The real
+  // Engel dome is a deep verdigris — dark against sky, exactly its job.
+  const green = new THREE.MeshStandardMaterial({ color: 0x39584a, roughness: 0.55, metalness: 0.1 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd9b45a, roughness: 0.4, metalness: 0.5, emissive: 0xd9b45a, emissiveIntensity: 0.18 });
   const stone = new THREE.MeshStandardMaterial({ color: 0xcfc8b8, roughness: 0.85 });
 
   // podium / steps (the church stands high on a hill above the square)
@@ -97,7 +103,7 @@ function turkuCathedral() {
   const g = new THREE.Group();
   const brick = new THREE.MeshStandardMaterial({ color: 0x93503f, roughness: 0.9 });
   const brickD = new THREE.MeshStandardMaterial({ color: 0x7d4234, roughness: 0.9 });
-  const green = new THREE.MeshStandardMaterial({ color: 0x6a9080, roughness: 0.55, metalness: 0.1 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x3a5a4e, roughness: 0.55, metalness: 0.1 });
   const gold = new THREE.MeshStandardMaterial({ color: 0xd9b45a, roughness: 0.4, metalness: 0.5 });
 
   // nave (long body) + steep gable roof, apse at the east end
@@ -124,10 +130,10 @@ function turkuCathedral() {
 // cathedral it's what tells you, from the water, that this is Helsinki.
 function uspenskiCathedral() {
   const g = new THREE.Group();
-  const brick = new THREE.MeshStandardMaterial({ color: 0x8f4030, roughness: 0.9 });
+  const brick = new THREE.MeshStandardMaterial({ color: 0x8f4030, roughness: 0.9, emissive: 0x5a2418, emissiveIntensity: 0.14 });
   const brickD = new THREE.MeshStandardMaterial({ color: 0x743323, roughness: 0.9 });
-  const green = new THREE.MeshStandardMaterial({ color: 0x5f8676, roughness: 0.5, metalness: 0.15 });
-  const gold = new THREE.MeshStandardMaterial({ color: 0xcaa03e, roughness: 0.35, metalness: 0.65 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x35544a, roughness: 0.5, metalness: 0.15 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xcaa03e, roughness: 0.35, metalness: 0.65, emissive: 0xcaa03e, emissiveIntensity: 0.22 });
   const stone = new THREE.MeshStandardMaterial({ color: 0xb8b0a0, roughness: 0.85 });
 
   g.add(box(30, 10, 30, 0, -4, 0, stone));                 // the rock podium it stands on

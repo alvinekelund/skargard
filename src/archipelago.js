@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeNoise2D, makeFbm, mulberry32 } from './noise.js';
-import { buildProps } from './props.js';
+import { buildProps, LANDMARK_SITES } from './props.js';
 import { createSatellite } from './satellite.js';
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -677,6 +677,15 @@ const HARBOR_BASINS = [
   [194720, -39760, 280],   // Katajanokka / Viking berth channel
 ];
 
+// Known OPEN WATER the mainland-tile SDF misreads as land (parity error across
+// clip seams + DEM smear): the tile hoisted a phantom 8–11 m hill into the
+// middle of Helsinki's South Harbour and a row of real Valkosaari-area
+// footprints rose straight out of the sea, walling the cathedral off from its
+// own approach. Inside these hand-verified discs the water is water, always.
+const WATER_CLIP = [
+  [194210, -39240, 340],   // South Harbour mouth: Kaivopuisto ↔ Katajanokka
+];
+
 // City waterfronts are BUILT — stone quays standing ~1.5 m proud of the sea,
 // not the natural low-shelf shore the simplified coastline bakes to (which the
 // waves then swallow, leaving whole street rows looking flooded). Inside these
@@ -701,6 +710,13 @@ function islandHeight(lx, lz, isl) {
     // MAINLAND tile: distance-to-real-coast drives the shore ramp; the DEM
     // grid carries the interior. Adjacent tiles sample the same globally
     // aligned lattice, so seams match; heightAt's max() hides the skirts.
+    {
+      const wx = lx + isl.x, wz = lz + isl.z;
+      for (let k = 0; k < WATER_CLIP.length; k++) {
+        const dwx = wx - WATER_CLIP[k][0], dwz = wz - WATER_CLIP[k][1];
+        if (dwx * dwx + dwz * dwz < WATER_CLIP[k][2] * WATER_CLIP[k][2]) return -3.6;
+      }
+    }
     const sm = polySdfFast(lx, lz, isl);
     let h;
     if (sm <= 0) h = Math.max(sm * 0.55, -8.0) - 0.05;
@@ -893,6 +909,8 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
   const islandMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0, envMapIntensity: 0.4 });
   // the closed-canopy blanket: matte, lit like foliage, never glossy
   const canopyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0, envMapIntensity: 0.35 });
+  // distant city massing (skyline LOD): plain plaster, no drape shader
+  const cityLodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, envMapIntensity: 0.3 });
   islandMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = { value: 0 };
     sh.uniforms.uRockD = { value: rockD };
@@ -1792,7 +1810,7 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
     }
   }
   // shared assets must survive dispose
-  for (const m of [islandMat, canopyMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
+  for (const m of [islandMat, canopyMat, cityLodMat, pineMat, scotsMat, birchMat, trunkMat, birchTrunkMat, juniperMat, boulderMat, grassMat, reedMat, depthNeedle, depthLeaf]) m.__shared = true;
   for (const t of [needleTex, leafTex, grassTex, rockD, rockN, rockR]) t.__shared = true;
   for (const arr of [pineGeos, scotsGeos, birchGeos]) for (const gg of arr) { gg.trunk.__shared = true; gg.canopy.__shared = true; }
   for (const g of [juniperGeo, keloGeo, boulderGeo, grassGeo, slabGeo, reedGeo]) g.__shared = true;
@@ -2369,8 +2387,101 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
       seamarks: (realData?.seamarks || []).filter((m) => inBox(m[0], m[1])),
       roads: regionRoads,
     };
-    propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region });
+    // the aerial photo is GPS-true: a building whose site shows SEA pixels is
+    // standing on phantom terrain (the harbour SDF parity bug hoisted a 10 m
+    // hill into Helsinki's South Harbour and a block row rose from the water)
+    const seaAt = (x, z) => useLiveCover && satellite.sampleClass(x, z) === 0;
+    propsRef = buildProps({ activeSet, islandHeight, heightAt, center: activeCenter, region, seaAt });
     activeGroup.add(propsRef.group);
+
+    // ── city skyline LOD ────────────────────────────────────────────────
+    // Detailed buildings render only near the boat (distance-sorted caps), so
+    // sailing toward Helsinki you saw ONE row of waterfront and no city rising
+    // behind it — "some big block houses", never a capital. For every city
+    // core in sight, extrude simple massing boxes for all its footprints
+    // beyond the detailed ring, merged to a single draw call. From the sea the
+    // skyline exists; up close the detailed pass owns the street.
+    {
+      const holeR = Math.max(700, (propsRef.buildReach || 0) * 0.85);
+      const holeR2 = holeR * holeR;
+      const SIGHT = 9000;
+      const cand = [];
+      for (const [qx, qz, qr] of CITY_QUAYS) {
+        if (Math.hypot(qx - cx0, qz - cz0) > qr + SIGHT) continue;
+        const lodR2 = (qr + 900) ** 2;
+        for (const b of (realData?.buildings || [])) {
+          const bx = b[0], bz = b[1];
+          if ((bx - qx) ** 2 + (bz - qz) ** 2 > lodR2) continue;
+          if ((bx - cx0) ** 2 + (bz - cz0) ** 2 < holeR2) continue;
+          const foot = b[2] * b[3];
+          if (foot < 90) continue;                     // sheds don't shape a skyline
+          // never box over a hand-built landmark — a 7-floor massing cube was
+          // swallowing the cathedral it is supposed to frame
+          let onSite = false;
+          for (const [sx2, sz2] of LANDMARK_SITES) if ((bx - sx2) ** 2 + (bz - sz2) ** 2 < 70 * 70) { onSite = true; break; }
+          if (onSite) continue;
+          cand.push([foot, bx, bz, b[2], b[3], b[4], b[5]]);
+        }
+      }
+      if (cand.length) {
+        cand.sort((a, b) => b[0] - a[0]);
+        const N = Math.min(cand.length, 4200);
+        // 30 verts per box (5 faces, no bottom), written straight into buffers
+        const pos = new Float32Array(N * 30 * 3);
+        const col = new Float32Array(N * 30 * 3);
+        // muted stone/plaster — bright pastels glowed white through the haze
+        const PAL = [0xa89c88, 0xa2937f, 0x998b77, 0xaaa08c, 0x938470, 0x9e9078];
+        const cTint = new THREE.Color();
+        let vi = 0, built = 0;
+        const quad = (ax, ay, az, bx2, by, bz2, cx2, cy, cz2, dx, dy, dz, r, g2, bl) => {
+          const idx = [[ax, ay, az], [bx2, by, bz2], [cx2, cy, cz2], [ax, ay, az], [cx2, cy, cz2], [dx, dy, dz]];
+          for (const [x, y, z] of idx) {
+            pos[vi * 3] = x; pos[vi * 3 + 1] = y; pos[vi * 3 + 2] = z;
+            col[vi * 3] = r; col[vi * 3 + 1] = g2; col[vi * 3 + 2] = bl;
+            vi++;
+          }
+        };
+        for (let k = 0; k < N; k++) {
+          const [foot, bx, bz, bw, bd, ang, cls] = cand[k];
+          const ground = heightAt(bx, bz);
+          if (ground < 0.05) continue;                  // never stand in the sea
+          if (seaAt(bx, bz)) continue;                  // photo says water: phantom terrain
+          const seed = ((Math.floor(bx * 7 + bz * 13) >>> 0) % 1000) / 1000;
+          // Helsinki's skyline is a LEVEL cornice (~4–5 floors) with churches
+          // above it — footprint-driven heights made warehouses into towers
+          // that walled off the cathedral from its own sea approach
+          const floors = cls === 2 ? 4
+            : Math.max(3, Math.min(6, Math.round(3.1 + seed * 2.1 + (foot > 1100 ? 0.5 : 0))));
+          const h = floors * 3.15;
+          const y0 = Math.max(ground, 0.6) - 0.05, y1 = y0 + h;
+          cTint.setHex(PAL[Math.floor(seed * PAL.length)]);
+          const l = 0.86 + seed * 0.22;
+          const r = cTint.r * l, g2 = cTint.g * l, bl = cTint.b * l;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const hx = bw / 2, hz = bd / 2;
+          const cX = (dx2, dz2) => bx + dx2 * ca - dz2 * sa;
+          const cZ = (dx2, dz2) => bz + dx2 * sa + dz2 * ca;
+          const x00 = cX(-hx, -hz), z00 = cZ(-hx, -hz), x10 = cX(hx, -hz), z10 = cZ(hx, -hz);
+          const x11 = cX(hx, hz), z11 = cZ(hx, hz), x01 = cX(-hx, hz), z01 = cZ(-hx, hz);
+          // four walls + roof (roof slightly darker)
+          quad(x00, y0, z00, x10, y0, z10, x10, y1, z10, x00, y1, z00, r, g2, bl);
+          quad(x10, y0, z10, x11, y0, z11, x11, y1, z11, x10, y1, z10, r * 0.92, g2 * 0.92, bl * 0.92);
+          quad(x11, y0, z11, x01, y0, z01, x01, y1, z01, x11, y1, z11, r, g2, bl);
+          quad(x01, y0, z01, x00, y0, z00, x00, y1, z00, x01, y1, z01, r * 0.92, g2 * 0.92, bl * 0.92);
+          quad(x00, y1, z00, x10, y1, z10, x11, y1, z11, x01, y1, z01, r * 0.55, g2 * 0.55, bl * 0.55);
+          built++;
+        }
+        if (built > 0) {
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, vi * 3), 3));
+          geo.setAttribute('color', new THREE.BufferAttribute(col.subarray(0, vi * 3), 3));
+          geo.computeVertexNormals();
+          const lod = new THREE.Mesh(geo, cityLodMat);
+          lod.castShadow = false; lod.receiveShadow = false;
+          activeGroup.add(lod);
+        }
+      }
+    }
 
     // what in this region is measured data vs procedural — feeds the D overlay
     const cover = new Set();

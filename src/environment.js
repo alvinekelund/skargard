@@ -10,7 +10,9 @@ export const PRESETS = {
   day: {
     sunElev: 38, sunAz: 205, turbidity: 1.8, rayleigh: 2.3, mie: 0.0035, g: 0.75, exposure: 0.33,
     sunColor: 0xfff3e0, sunInt: 5.6, hemiSky: 0x7fb2ff, hemiGround: 0x2e4f46, hemiInt: 0.6,
-    ambient: 0x3a6ea5, ambientInt: 0.22, fog: 0xa9c6e0, fogDensity: 0.00022,
+    // 0.00022 erased the Helsinki cathedral from its own sea approach — the
+    // one silhouette that names the city. Slightly drier summer air.
+    ambient: 0x3a6ea5, ambientInt: 0.22, fog: 0xa9c6e0, fogDensity: 0.000185,
     waterColor: 0x2a544e, sunWater: 0xfff2d0, distortion: 3.4, waterSize: 2.8,
     cloudWarm: 0xfff8ee, cloudCool: 0xc4d3e6, cloudCount: 14, cloudOpacity: 0.82, cloudElevHi: true,
     cloudSize: [900, 1800],
