@@ -1660,6 +1660,20 @@ export function buildArchipelago(scene, env, mapData, realData, coverData = null
             if (land >= 5 && land <= 8) {                  // a genuinely SHELTERED edge —
               // reeds never stand on exposed outer shores (the judge caught
               // belts on Utö's open rock; real Phragmites needs a quiet bay)
+              // ...and they grow in PATCHES bay by bay, never as a uniform hem
+              // stitched along every metre of coast — a low-frequency gate
+              // leaves whole stretches bare and packs others dense
+              if (fbm((cx + nlx) * 0.004, (cz + nlz) * 0.004, 2) < -0.05) continue;
+              // FETCH test: local shelter on an outer reef still faces miles
+              // of open water (Jurmo's boulder reef wore reed clumps). Probe
+              // this island's own land 420 m out in 8 directions — if most
+              // rays never touch it, the sea has room to build waves here.
+              let openFetch = 0;
+              for (let a8 = 0; a8 < 8; a8++) {
+                const fx = nlx + Math.cos(a8 * 0.785) * 420, fz = nlz + Math.sin(a8 * 0.785) * 420;
+                if (islandHeight(fx, fz, isl) < -1.5) openFetch++;
+              }
+              if (openFetch >= 6) continue;
               const wl = Math.hypot(wox, woz) || 1;
               for (let k = 0; k < 4 && reedBudget > 0; k++) {
                 for (const stepT of [0.5, 0.9, 1.4, 2.0]) {
