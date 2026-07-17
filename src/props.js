@@ -723,6 +723,8 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
   // gives the skyline its serrated texture instead of a flat parapet band
   const UROOFS = [0x4d5b52, 0x8a4a3c, 0x54585c, 0x3b3e42, 0x6a6357].map((c) => new THREE.Color(c));
   const C_CHIMNEY = new THREE.Color(0xc9c2b6);
+  const C_SHOP = new THREE.Color(0x273238), C_AWNING = new THREE.Color(0x8c3e32);
+  const C_BALCONY = new THREE.Color(0xb9b8b1), C_SERVICE = new THREE.Color(0x55595b);
   const _c = new THREE.Color();
   // apartment blocks belong ONLY to the real cities — a village (Nauvo, Korpo…)
   // packs medium buildings tighter than Helsinki packs its big spaced blocks, so
@@ -808,17 +810,31 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
     const longEdge = edges.reduce((a, b) => a.len > b.len ? a : b);
     const shortEdge = edges.reduce((a, b) => a.len < b.len ? a : b);
     const rectangular = p.length === 4 && longEdge.len / Math.max(shortEdge.len, 0.1) < 8;
-    const pitched = roof !== 1 && rectangular && (roof === 2 || roof === 3 || roof === 4 || seed() < 0.72);
+    const pitched = roof !== 1 && rectangular && (roof === 2 || roof === 3 || roof === 4 || roof === 5 || seed() < 0.72);
     if (pitched) {
       const ridgeL = longEdge.len + 0.5, fullW = shortEdge.len + 0.5;
       const roofH = roof === 4 ? Math.min(5.5, fullW * 0.38) : Math.min(4.5, Math.max(1.4, fullW * 0.3));
-      const profile = new THREE.Shape();
-      profile.moveTo(-fullW / 2, 0); profile.lineTo(fullW / 2, 0); profile.lineTo(0, roofH); profile.closePath();
-      const roofGeo = new THREE.ExtrudeGeometry(profile, { depth: ridgeL, bevelEnabled: false });
-      roofGeo.translate(0, 0, -ridgeL / 2);
-      roofGeo.rotateY(Math.atan2(longEdge.dx, longEdge.dz));
-      roofGeo.translate(rec.cx, baseY + h + 0.18, rec.cz);
-      bodyGeos.push(paintGeo(roofGeo, roofC));
+      const yaw = Math.atan2(longEdge.dx, longEdge.dz);
+      if (roof === 3 || roof === 5) {
+        const roofGeo = new THREE.ConeGeometry(1, roofH, 4);
+        roofGeo.rotateY(Math.PI / 4); roofGeo.scale(fullW / Math.SQRT2, 1, ridgeL / Math.SQRT2);
+        roofGeo.rotateY(yaw); roofGeo.translate(rec.cx, baseY + h + roofH / 2 + 0.18, rec.cz);
+        bodyGeos.push(paintGeo(roofGeo, roofC));
+      } else {
+        const profile = new THREE.Shape();
+        if (roof === 4) {
+          profile.moveTo(-fullW / 2, 0); profile.lineTo(-fullW * 0.32, roofH * 0.72);
+          profile.lineTo(-fullW * 0.18, roofH); profile.lineTo(fullW * 0.18, roofH);
+          profile.lineTo(fullW * 0.32, roofH * 0.72); profile.lineTo(fullW / 2, 0);
+        } else {
+          profile.moveTo(-fullW / 2, 0); profile.lineTo(fullW / 2, 0); profile.lineTo(0, roofH);
+        }
+        profile.closePath();
+        const roofGeo = new THREE.ExtrudeGeometry(profile, { depth: ridgeL, bevelEnabled: false });
+        roofGeo.translate(0, 0, -ridgeL / 2); roofGeo.rotateY(yaw);
+        roofGeo.translate(rec.cx, baseY + h + 0.18, rec.cz);
+        bodyGeos.push(paintGeo(roofGeo, roofC));
+      }
     } else {
       // Complex perimeter blocks are rarely literally roofless. OSM often has
       // no roof tag, so give unknown historic footprints a visible sheet-metal
@@ -855,6 +871,28 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       wall.rotateY(wallYaw);
       wall.translate((a[0] + b[0]) / 2, baseY + h / 2, (a[1] + b[1]) / 2);
       urbanGeos[facadeStyle].push(paintGeo(wall, wallC));
+
+      if (placed < 170 && L > 5 && (kind === 1 || facadeStyle === 2 || (kind === 0 && seed() < 0.2))) {
+        const shopW = Math.max(3.2, L - 1.0);
+        const shop = new THREE.BoxGeometry(shopW, 2.45, 0.13);
+        shop.rotateY(wallYaw); shop.translate((a[0] + b[0]) / 2, baseY + 1.38, (a[1] + b[1]) / 2);
+        bodyGeos.push(paintGeo(shop, C_SHOP));
+        const awning = new THREE.BoxGeometry(Math.min(shopW * 0.7, 12), 0.16, 0.72);
+        awning.rotateY(wallYaw); awning.translate((a[0] + b[0]) / 2, baseY + 2.78, (a[1] + b[1]) / 2);
+        bodyGeos.push(paintGeo(awning, seed() < 0.5 ? C_AWNING : C_TRIM));
+      } else if (placed < 170 && kind === 2 && L > 8 && edges[i] === longEdge) {
+        const service = new THREE.BoxGeometry(Math.min(5.2, L * 0.42), 3.6, 0.16);
+        service.rotateY(wallYaw); service.translate((a[0] + b[0]) / 2, baseY + 1.9, (a[1] + b[1]) / 2);
+        bodyGeos.push(paintGeo(service, C_SERVICE));
+      }
+      if (placed < 120 && facadeStyle === 2 && kind === 0 && L > 9 && (i === 0 || seed() < 0.22)) {
+        const nBal = Math.min(3, Math.floor((h - 5) / 3.15));
+        for (let fl = 0; fl < nBal; fl++) {
+          const balcony = new THREE.BoxGeometry(Math.min(4.6, L * 0.42), 0.18, 1.05);
+          balcony.rotateY(wallYaw); balcony.translate((a[0] + b[0]) / 2, baseY + 5.1 + fl * 3.15, (a[1] + b[1]) / 2);
+          bodyGeos.push(paintGeo(balcony, C_BALCONY));
+        }
+      }
 
       // Stone belt course and restrained vertical bays: real Empire/Jugend
       // façades have scale and cadence, while a naked repeated window texture
