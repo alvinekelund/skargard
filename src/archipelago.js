@@ -748,7 +748,10 @@ function islandHeight(lx, lz, isl) {
     const gh = gridH(isl.grid, lx, lz);
     // glacial hummocks between the 25 m+ DEM nodes — the bilinear alone reads
     // pancake-smooth; amplitude rides the local height so shores stay gentle
-    const hum = fbm((lx + cx) * 0.026, (lz + cz) * 0.026, 2) * Math.min(gh, 9) * 0.4 * shore;
+    // Preserve the measured DEM. Procedural relief is only sub-metre surface
+    // roughness between 10–32 m samples; the former factor could displace a
+    // measured hillside by ±3.6 m and change the recognisable island profile.
+    const hum = fbm((lx + cx) * 0.026, (lz + cz) * 0.026, 2) * Math.min(gh, 9) * 0.10 * shore;
     h = Math.max(gh * shore + hum, dome * 0.9);               // land stays above water
   } else {
     h = dome * isl.H;

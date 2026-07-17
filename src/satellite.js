@@ -35,7 +35,7 @@ const TILE_URL = (z, x, y) =>
 // z16 is ~1.2 m/pixel at 60°N: enough to preserve street edges, individual
 // roofs, small fields and exposed granite seams. z15 blurred those into 2–3 m
 // colour blocks, so the supposedly measured terrain still read procedural.
-export function createSatellite({ zoom = 16, half = 1500, canvasSize = 2560 } = {}) {
+export function createSatellite({ zoom = 16, half = 1800, canvasSize = 3072 } = {}) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = canvasSize;
   const ctx = cv.getContext('2d');
@@ -43,7 +43,11 @@ export function createSatellite({ zoom = 16, half = 1500, canvasSize = 2560 } = 
 
   const texture = new THREE.CanvasTexture(cv);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.flipY = false;                       // v=0 at the top row (north)
+  // Canvas row 0 is north, while WebGL v=0 is the texture's lower edge. Keep
+  // Three's default vertical upload flip so shader v=0 samples that north row.
+  // Disabling it mirrored every aerial mosaic north↔south against the DEM,
+  // roads and buildings despite all sources using the same coordinates.
+  texture.flipY = true;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;

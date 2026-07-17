@@ -8,8 +8,6 @@
      · warm air — the faintest high, open hiss, so the scene isn't sealed shut
      · bow-wash that rises with speed
      · now and then, far off, a gull
-     · very sparse D-major pentatonic tones, like light glinting on the water
-
    Starts MUTED, always (the 🔇 button opts in; autoplay is never allowed).
    The voice builders are exported so an OfflineAudioContext can render and
    analyse the same recipe headlessly. */
@@ -198,22 +196,20 @@ export function createAudio() {
   let lapTimer = null, gullTimer = null;
   let heelPrev = 0, lastCreak = 0;
 
-  // the rig and deck CREAK as she loads up — a low woody groan whenever the
-  // heel changes fast (a gust leaning her over, a tack coming through). Two
-  // detuned low band-passed noise bursts with a slow downward bend: timber
-  // and rope working, the sound that makes a boat feel like a living thing.
+  // A rare, broad wooden murmur as the hull loads. Keeping this unpitched and
+  // low-Q avoids the synthetic horror-film groan of a resonant narrow filter.
   function creak(intensity) {
     const t = ctx.currentTime + 0.01;
-    for (const [freq, lvl, dur] of [[210 + Math.random() * 90, 1.0, 0.5], [96, 0.55, 0.62]]) {
+    for (const [freq, lvl, dur] of [[180 + Math.random() * 70, 1.0, 0.7]]) {
       const src = ctx.createBufferSource();
       src.buffer = whiteBuf; src.loop = true;
       src.playbackRate.setValueAtTime(1.0, t);
       src.playbackRate.linearRampToValueAtTime(0.72, t + dur);        // the groan bends down
       const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 9;
+      bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 0.55;
       bp.frequency.linearRampToValueAtTime(freq * 0.8, t + dur);
       const g = ctx.createGain();
-      const peak = 0.022 * intensity * lvl;
+      const peak = 0.004 * intensity * lvl;
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.001), t + 0.09);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -229,29 +225,20 @@ export function createAudio() {
     const rate = Math.abs(heel - heelPrev) / dt;         // rad/s
     heelPrev = heel;
     const now = ctx.currentTime;
-    if (rate > 0.09 && now - lastCreak > 7 + Math.random() * 5) {
+    if (rate > 0.13 && now - lastCreak > 18 + Math.random() * 12) {
       lastCreak = now;
       creak(Math.min(1, rate / 0.16));
     }
   }
 
-  // a small diesel auxiliary: a low throbbing tone (firing frequency) with a
-  // sub and a little grille rattle, amplitude-pulsed so it chugs
+  // Auxiliary diesel is intentionally almost subliminal. A filtered noise bed
+  // reads as vibration through the hull without an oscillator's industrial hum.
   function buildEngine() {
     const g = ctx.createGain(); g.gain.value = 0; g.connect(master);
-    const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = 46;
-    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 150; lp.Q.value = 0.35;
-    const sub = ctx.createOscillator(); sub.type = 'sine'; sub.frequency.value = 23;
-    const subG = ctx.createGain(); subG.gain.value = 0.5;
-    // chug: amplitude pulse a touch above idle firing rate
-    const pulse = ctx.createOscillator(); pulse.type = 'sine'; pulse.frequency.value = 7.5;
-    const pulseG = ctx.createGain(); pulseG.gain.value = 0.35;
-    const inner = ctx.createGain(); inner.gain.value = 0.7;
-    osc.connect(lp); lp.connect(inner); sub.connect(subG); subG.connect(inner);
-    inner.connect(g);
-    pulse.connect(pulseG); pulseG.connect(inner.gain);
-    osc.start(); sub.start(); pulse.start();
-    return { gain: g, osc, sub };
+    const src = ctx.createBufferSource(); src.buffer = whiteBuf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 105; lp.Q.value = 0.2;
+    src.connect(lp); lp.connect(g); src.start();
+    return { gain: g, filter: lp };
   }
 
   function scheduleLap() {
@@ -359,11 +346,9 @@ export function createAudio() {
     if (shoreGain) shoreGain.gain.setTargetAtTime(shoreNorm * shoreNorm * 0.005, ctx.currentTime, 4.0);
     updateLeaves();
     if (engine) {
-      const lvl = motorOn ? 0.008 + throttle * 0.014 : 0;
+      const lvl = motorOn ? 0.002 + throttle * 0.003 : 0;
       engine.gain.gain.setTargetAtTime(lvl, ctx.currentTime, 0.4);
-      const rpm = 42 + throttle * 26;               // idle → cruising firing rate
-      engine.osc.frequency.setTargetAtTime(rpm, ctx.currentTime, 0.5);
-      engine.sub.frequency.setTargetAtTime(rpm * 0.5, ctx.currentTime, 0.5);
+      engine.filter.frequency.setTargetAtTime(90 + throttle * 45, ctx.currentTime, 0.8);
     }
   }
 

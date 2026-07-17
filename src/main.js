@@ -91,15 +91,30 @@ const boat = createBoat(scene);
       [23555, -43451, 110], [4760, -39935, 115],
       [193869, -40598, 150], [194256, -40443, 130], [44143, -72080, 145],
     ];
+    const nearbyBuildings = (realData?.buildings || []).filter(([x, z]) =>
+      Math.abs(x - qx) < 1100 && Math.abs(z - qz) < 1100);
+    const nearbyPiers = (realData?.piers || []).filter((line) => line.some(([x, z]) =>
+      Math.abs(x - qx) < 1100 && Math.abs(z - qz) < 1100));
+    const segmentDistanceSq = (x, z, ax, az, bx, bz) => {
+      const dx = bx - ax, dz = bz - az, ll = dx * dx + dz * dz || 1;
+      const t = THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / ll, 0, 1);
+      return (x - ax - dx * t) ** 2 + (z - az - dz * t) ** 2;
+    };
     const clearOfHazards = (x, z, margin = 105) => {
       for (const [lx, lz, r] of landmarkClearance)
         if ((x - lx) ** 2 + (z - lz) ** 2 < r * r) return false;
       const m2 = margin * margin;
       for (const route of Object.values(ROUTES)) for (let i = 0; i < route.length - 1; i++) {
         const [ax, az] = route[i], [bx, bz] = route[i + 1];
-        const dx = bx - ax, dz = bz - az, ll = dx * dx + dz * dz || 1;
-        const t = THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / ll, 0, 1);
-        if ((x - ax - dx * t) ** 2 + (z - az - dz * t) ** 2 < m2) return false;
+        if (segmentDistanceSq(x, z, ax, az, bx, bz) < m2) return false;
+      }
+      for (const [bx, bz, w = 10, d = 10] of nearbyBuildings) {
+        const r = Math.hypot(w, d) * 0.5 + 22;
+        if ((x - bx) ** 2 + (z - bz) ** 2 < r * r) return false;
+      }
+      for (const line of nearbyPiers) for (let i = 0; i < line.length - 1; i++) {
+        const [ax, az] = line[i], [bx, bz] = line[i + 1];
+        if (segmentDistanceSq(x, z, ax, az, bx, bz) < 38 * 38) return false;
       }
       return true;
     };

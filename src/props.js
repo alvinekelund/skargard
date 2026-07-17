@@ -602,7 +602,7 @@ function buildHarbor(group, dyn, rng, heightAt, H, ax, az, axis, center) {
         const side = s * (3.0 + rng() * 0.7);
         const boatX = fx + vx * along + rx * side, boatZ = fz + vz * along + rz * side;
         if (heightAt(boatX, boatZ) > -0.6) continue;
-        if ((boatX - center.x) ** 2 + (boatZ - center.y) ** 2 < 32 ** 2) continue;
+        if ((boatX - center.x) ** 2 + (boatZ - center.y) ** 2 < 55 ** 2) continue;
         const r = rng();
         const b = r < 0.6 ? smallSailboat(rng) : r < 0.85 ? motorboat(rng) : rowboat(rng);
         if (r < 0.6) b.scale.setScalar(1.35 + rng() * 0.8);       // yachts 8–13 m
@@ -1384,7 +1384,7 @@ export function buildProps({ activeSet, islandHeight, heightAt, center, region =
       const side = (k % 2 ? 1 : -1) * (2.8 + rng() * 0.9);
       const bx = px - dx * along + rx * side, bz = pz - dz * along + rz * side;
       if (heightAt(bx, bz) > -0.6) continue;               // must lie in water
-      if ((bx - center.x) ** 2 + (bz - center.y) ** 2 < 32 ** 2) continue;
+      if ((bx - center.x) ** 2 + (bz - center.y) ** 2 < 55 ** 2) continue;
       const r = rng();
       const b = r < 0.5 ? smallSailboat(rng) : r < 0.8 ? motorboat(rng) : rowboat(rng);
       // guest-harbour boats are 6–12 m — comparable to the Swan, not dinghies
