@@ -45,8 +45,59 @@ from bake_osm_props import (  # noqa: E402
 BOX = (59.60, 19.05, 60.55, 25.95)
 
 RDP_TOL = 6.0
-MAX_PTS = 40
+MAX_PTS = 40          # for way-scale rings; relation rings scale by perimeter
 COAST_R = 1200.0
+
+
+def ring_self_intersects(pts):
+    """Any two non-adjacent edges cross? O(n^2) — rings are <= ~200 pts."""
+    n = len(pts)
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue
+            c, dd = pts[j], pts[(j + 1) % n]
+            d1 = (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+            d2 = (b[0]-a[0])*(dd[1]-a[1])-(b[1]-a[1])*(dd[0]-a[0])
+            d3 = (dd[0]-c[0])*(a[1]-c[1])-(dd[1]-c[1])*(a[0]-c[0])
+            d4 = (dd[0]-c[0])*(b[1]-c[1])-(dd[1]-c[1])*(b[0]-c[0])
+            if ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0)):
+                return True
+    return False
+
+
+def simplify_valid(pts, base_tol):
+    """RDP with a perimeter-scaled point cap and a validity ladder.
+
+    Aggressive RDP on a long boundary creates BOWTIES (the first Jurmo bake
+    shipped a 3.8 km heath ring self-crossed into a −1.5 km² shoelace).
+    Try the normal tolerance; if the result self-intersects, halve the
+    tolerance until it stops (allowing more points), and as a last resort
+    return the un-simplified ring capped raw. Returns None if even the raw
+    ring is invalid (broken stitch — caller should skip it)."""
+    per = sum(math.dist(pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts)))
+    cap = max(MAX_PTS, min(140, int(per / 110)))
+    tol = base_tol
+    simp = rdp(pts, tol)
+    while len(simp) > cap:
+        tol *= 1.5
+        simp = rdp(pts, tol)
+    tries = 0
+    while len(simp) >= 3 and ring_self_intersects(simp) and tries < 6:
+        tol *= 0.5
+        cand = rdp(pts, tol)
+        if len(cand) > 170:
+            break
+        simp = cand
+        tries += 1
+    if len(simp) < 3:
+        return None
+    if ring_self_intersects(simp):
+        if not ring_self_intersects(pts) and len(pts) <= 170:
+            return pts
+        return None
+    return simp
 NAT_CLS = [("natural", "wood", 0), ("landuse", "forest", 0),
            ("natural", "heath", 1), ("natural", "scrub", 2)]
 
@@ -158,11 +209,18 @@ def main():
     seen_rel = set()
     added = []
     jurmo_heath_m2 = 0.0
+    skipped = 0
+    dropped_invalid = 0
     for i, t in enumerate(tiles):
         try:
             resp = fetch_relations(t, args.cache)
         except Exception as e:  # stonewall etc — keep what we have, report
             print(f"tile {i}: FETCH FAILED {e}")
+            skipped += 1
+            continue
+        if not resp:            # overpass() returns None when its retries run dry
+            print(f"tile {i}: no response after retries — skipping")
+            skipped += 1
             continue
         for el in resp.get("elements", []):
             if el.get("type") != "relation" or el["id"] in seen_rel:
@@ -176,15 +234,16 @@ def main():
                 pts = dedupe([(round(x), round(z)) for (x, z) in pts])
                 if len(pts) < 3:
                     continue
-                tol = RDP_TOL
-                simp = rdp(pts, tol)
-                while len(simp) > MAX_PTS:
-                    tol *= 1.5
-                    simp = rdp(pts, tol)
-                if len(simp) < 3:
+                # relations are stand-scale: 8 m fidelity is invisible in-game
+                simp = simplify_valid(pts, 8.0)
+                if simp is None:
+                    dropped_invalid += 1
                     continue
                 a = abs(shoelace2(simp)) * 0.5
-                if a < max(NATURE_MIN_AREA, 300.0):
+                # heath is the mission (Jurmo!) — keep it down to small sweeps;
+                # wood/scrub relations only matter at real stand size, and the
+                # sliver tail alone blew the size budget
+                if a < (600.0 if c == 1 else 2000.0):
                     continue
                 if not any_near(coast, simp, COAST_R):
                     continue
@@ -205,11 +264,17 @@ def main():
         by_c[r["c"]] = by_c.get(r["c"], 0) + 1
     print(f"by class: {by_c}")
 
+    print(f"skipped tiles: {skipped}, rings dropped as invalid: {dropped_invalid}")
     if not added:
         print("nothing to add (already baked?) — exiting clean")
         return
     if jurmo_heath_m2 < 8e5:
-        print("WARNING: Jurmo heath under 0.8 km^2 — relations may be missing from OSM or the fetch failed there")
+        if skipped:
+            print("FATAL: Jurmo heath under 0.8 km^2 AND tiles were skipped — "
+                  "rerun (cache resumes) before writing anything")
+            sys.exit(1)
+        print("WARNING: Jurmo heath under 0.8 km^2 with full coverage — "
+              "check whether OSM maps it as something else before trusting this")
 
     addition = ",".join(json.dumps(r, separators=(",", ":")) for r in added)
     new_raw = append_into(raw, "nature", addition)
